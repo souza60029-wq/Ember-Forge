@@ -1,0 +1,69 @@
+name: Export iOS
+
+on: push
+
+jobs:
+  exportar_ios:
+    runs-on: macos-latest
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Baixar o Godot (macOS)
+        run: |
+          wget https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_macos.universal.zip
+          unzip Godot_v4.4.1-stable_macos.universal.zip
+          chmod +x Godot.app/Contents/MacOS/Godot
+
+      - name: Baixar templates de exportacao
+        run: |
+          wget https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz
+          mkdir -p ~/Library/Application\ Support/Godot/export_templates/4.4.1.stable
+          unzip -q Godot_v4.4.1-stable_export_templates.tpz
+          mv templates/* ~/Library/Application\ Support/Godot/export_templates/4.4.1.stable/
+
+      - name: Exportar projeto Xcode (sem compilar ainda)
+        run: |
+          mkdir -p build/ios
+          ./Godot.app/Contents/MacOS/Godot --headless --verbose --export-debug "iOS" build/ios/project
+          ls -la build/ios
+
+      - name: Compilar o projeto Xcode (sem assinatura)
+        run: |
+          xcodebuild -project build/ios/project.xcodeproj \
+            -scheme project \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -derivedDataPath build/ios/DerivedData \
+            build
+          echo "=== Procurando o .app gerado ==="
+          find build/ios/DerivedData -name "*.app" -maxdepth 6
+
+      - name: Instalar ldid
+        run: |
+          brew install ldid
+
+      - name: Fakesign e empacotar em .ipa
+        run: |
+          APP_PATH="build/ios/DerivedData/Build/Products/Release-iphoneos/project.app"
+          echo "=== Assinando executavel interno com ldid ==="
+          ldid -S "$APP_PATH/project"
+          echo "=== Montando estrutura Payload ==="
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          zip -r -y ../../EmberForja.ipa Payload
+          cd ../..
+          echo "=== Resultado final ==="
+          ls -la EmberForja.ipa
+
+      - name: Enviar IPA final como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmberForja-ipa
+          path: EmberForja.ipa

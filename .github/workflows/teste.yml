@@ -1,0 +1,59 @@
+name: Teste Forja
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar Godot 4.2.2
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_linux.x86_64.zip -O godot.zip
+          unzip -q godot.zip
+          mv Godot_v4.2.2-stable_linux.x86_64 godot
+          chmod +x godot
+
+      - name: Testes de lógica, exportação e GIF
+        run: |
+          set -o pipefail
+          timeout 120 ./godot --headless --script testes/teste_forja.gd 2>&1 | tee log_logica.txt
+          if grep -q "SCRIPT ERROR\|Parse Error\|Compile Error\|Failed to load script\|FALHA" log_logica.txt; then
+            echo "Erro de script ou teste falhou"
+            exit 1
+          fi
+
+      - name: Conferir o GIF com Pillow
+        run: |
+          pip install pillow
+          python3 - <<'PY'
+          from PIL import Image
+          im = Image.open("teste_saida.gif")
+          n = getattr(im, "n_frames", 1)
+          print("quadros no gif:", n, im.size)
+          assert n == 3, "o gif deveria ter 3 quadros"
+          im.seek(0)
+          rgba = im.convert("RGBA")
+          assert rgba.getpixel((3, 4))[:3] == (255, 0, 0), "pixel vermelho do quadro 1"
+          assert rgba.getpixel((0, 0))[3] == 0, "fundo transparente"
+          big = Image.open("teste_saida_grande.gif")
+          assert big.n_frames == 2
+          big.seek(1)
+          big.convert("RGBA")
+          print("gif ok")
+          PY
+
+      - name: Abrir o app (checa scripts e interface)
+        run: |
+          set -o pipefail
+          timeout 120 ./godot --headless --quit-after 180 2>&1 | tee log_projeto.txt
+          if grep -q "SCRIPT ERROR\|Parse Error\|Compile Error\|Failed to load script" log_projeto.txt; then
+            echo "Erro de script ao abrir o app"
+            exit 1
+          fi

@@ -28,6 +28,15 @@ jobs:
           ./Godot.app/Contents/MacOS/Godot --headless --verbose --export-debug "iOS" build/ios/project
           ls -la build/ios
 
+      - name: Adicionar seletor de galeria e arquivos (nativo)
+        continue-on-error: true
+        run: |
+          set -e
+          xcrun --sdk iphoneos clang -fobjc-arc -fsyntax-only -arch arm64 -miphoneos-version-min=13.0 \
+            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" ios/EmberSeletor.m
+          (gem list -i xcodeproj > /dev/null) || sudo gem install xcodeproj
+          ruby ferramentas/adicionar_seletor_ios.rb build/ios/project.xcodeproj
+
       - name: Compilar o projeto Xcode (sem assinatura)
         run: |
           xcodebuild -project build/ios/project.xcodeproj \

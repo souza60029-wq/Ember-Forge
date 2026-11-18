@@ -1,0 +1,29 @@
+; Ember Forja: editor de pixel art e criador de personagens para a engine Ember.
+config_version=5
+
+[application]
+
+config/name="Ember Forja"
+config/version="0.1.0"
+run/main_scene="res://src/Forja.tscn"
+config/features=PackedStringArray("4.2")
+config/icon="res://icon.png"
+
+[display]
+
+window/size/viewport_width=540
+window/size/viewport_height=960
+window/stretch/mode="disabled"
+window/handheld/orientation=6
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+pointing/emulate_mouse_from_touch=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true

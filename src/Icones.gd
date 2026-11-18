@@ -111,6 +111,10 @@ static func desenhar(ci: CanvasItem, nome: String, r: Rect2, cor: Color, extra: 
 			ci.draw_line(_v(c, s, 0, 8), _v(c, s, 0, -15), cor, w)
 			ci.draw_polyline(PackedVector2Array([_v(c, s, -8, -7), _v(c, s, 0, -15), _v(c, s, 8, -7)]), cor, w)
 			ci.draw_polyline(PackedVector2Array([_v(c, s, -14, 2), _v(c, s, -14, 15), _v(c, s, 14, 15), _v(c, s, 14, 2)]), cor, w)
+		"importar":
+			ci.draw_line(_v(c, s, 0, -15), _v(c, s, 0, 8), cor, w)
+			ci.draw_polyline(PackedVector2Array([_v(c, s, -8, 0), _v(c, s, 0, 8), _v(c, s, 8, 0)]), cor, w)
+			ci.draw_polyline(PackedVector2Array([_v(c, s, -14, 2), _v(c, s, -14, 15), _v(c, s, 14, 15), _v(c, s, 14, 2)]), cor, w)
 		"pessoa":
 			ci.draw_circle(_v(c, s, 0, -9), 7.0 * s, cor)
 			ci.draw_arc(_v(c, s, 0, 17), 14.0 * s, PI, TAU, 16, cor, w * 1.4)

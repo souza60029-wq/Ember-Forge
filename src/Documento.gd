@@ -146,6 +146,52 @@ func adicionar_quadro(duplicar: bool) -> void:
 	_marcar_estrutura()
 
 
+# Coloca imagens importadas como quadros novos (cada uma ajustada ao tamanho da arte).
+# Se a sequência só tem um quadro vazio, a primeira imagem ocupa o lugar dele.
+func inserir_quadros(imagens: Array) -> int:
+	var q: Array = quadros()
+	var n: int = 0
+	for im in imagens:
+		var ajustada: Image = ajustar_imagem(im)
+		if n == 0 and q.size() == 1 and (q[0] as Image).is_invisible():
+			(q[0] as Image).copy_from(ajustada)
+			quadro = 0
+		else:
+			q.insert(quadro + 1, ajustada)
+			quadro += 1
+		n += 1
+	if n > 0:
+		_marcar_estrutura()
+	return n
+
+
+# Cabe na arte sem borrar: escala inteira para cima, vizinho mais próximo para baixo;
+# centro na horizontal e pés na base (como a engine alinha o sprite).
+func ajustar_imagem(origem: Image) -> Image:
+	var img: Image = Image.new()
+	img.copy_from(origem)
+	img.convert(Image.FORMAT_RGBA8)
+	var w: int = img.get_width()
+	var h: int = img.get_height()
+	var saida: Image = nova_imagem()
+	if w == largura and h == altura:
+		return img
+	var fator: float = minf(float(largura) / float(w), float(altura) / float(h))
+	var nw: int = w
+	var nh: int = h
+	if fator >= 1.0:
+		var inteiro: int = maxi(1, int(floorf(fator)))
+		nw = w * inteiro
+		nh = h * inteiro
+	else:
+		nw = maxi(1, int(roundf(float(w) * fator)))
+		nh = maxi(1, int(roundf(float(h) * fator)))
+	if nw != w or nh != h:
+		img.resize(nw, nh, Image.INTERPOLATE_NEAREST)
+	saida.blit_rect(img, Rect2i(0, 0, nw, nh), Vector2i((largura - nw) / 2, altura - nh))
+	return saida
+
+
 func remover_quadro() -> void:
 	var q: Array = quadros()
 	if q.size() <= 1:

@@ -12,6 +12,7 @@ const CorPicker = preload("res://src/CorPicker.gd")
 const Documento = preload("res://src/Documento.gd")
 const Exportador = preload("res://src/Exportador.gd")
 const Formato = preload("res://src/Formato.gd")
+const Seletor = preload("res://src/Seletor.gd")
 
 const FPS_OPCOES := [4, 6, 8, 12, 16, 24]
 const SESSAO := "user://forja/sessao.json"
@@ -40,6 +41,7 @@ var _btn_play: Boto = null
 var _btn_fps: Boto = null
 var _exp_status: Label = null
 var _vista_salva := {}
+var _seletor: Variant = null
 
 
 func _ready() -> void:
@@ -77,6 +79,10 @@ func _ready() -> void:
 	_tmr_toast.timeout.connect(_esconder_toast)
 	add_child(_tmr_toast)
 	get_viewport().size_changed.connect(_ao_redimensionar)
+	_seletor = Seletor.new()
+	_seletor.escolhidos.connect(_ao_importar)
+	_seletor.falhou.connect(_toast)
+	add_child(_seletor)
 	_restaurar_sessao()
 	_recarregar_tudo()
 	_aplicar_vista_salva.call_deferred()
@@ -182,7 +188,7 @@ func _montar() -> void:
 	var togs: Array = [_btn_tog("espelho"), _btn_tog("grade"), _btn_tog("cebola"), _btn_tog("pincel")]
 	var acoes: Array = [
 		_b("desfazer", _desfazer), _b("refazer", _refazer), _b("ajustar", _ajustar_vista),
-		_b("olho", _alternar_limpo), _b("pessoa", _abrir_sequencias), _b("salvar", _salvar_manual), _b("exportar", _abrir_exportar), _b("projeto", _abrir_projeto)]
+		_b("olho", _alternar_limpo), _b("pessoa", _abrir_sequencias), _b("importar", _abrir_importar), _b("salvar", _salvar_manual), _b("exportar", _abrir_exportar), _b("projeto", _abrir_projeto)]
 
 	var centro := VBoxContainer.new()
 	centro.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -783,6 +789,39 @@ func _apagar_golpe(i: int) -> void:
 		_folha.fechar()
 	_agendar_save()
 	_apos_trocar_seq()
+
+
+# --- importar sprites ---
+
+func _abrir_importar() -> void:
+	var f: Variant = _nova_folha("Importar sprites")
+	var c: VBoxContainer = f.conteudo
+	c.add_child(_linha("Galeria de fotos", "png", _pedir_import.bind("galeria")))
+	c.add_child(_linha("Explorador de arquivos", "projeto", _pedir_import.bind("arquivos")))
+	c.add_child(_rotulo("Cada imagem vira um quadro novo da sequência atual, ajustada ao tamanho da arte (pés na base).", Estilo.SUAVE, 0.28))
+
+
+func _pedir_import(origem: String) -> void:
+	if _folha != null:
+		_folha.fechar()
+	_seletor.pedir(origem, true, "imagem")
+
+
+func _ao_importar(caminhos: PackedStringArray) -> void:
+	var imgs: Array = []
+	var lista: Array = Array(caminhos)
+	lista.sort_custom(func(a, b): return str(a).naturalnocasecmp_to(str(b)) < 0)
+	for c in lista:
+		var im: Image = Image.load_from_file(str(c))
+		if im != null and not im.is_empty():
+			imgs.append(im)
+	if imgs.is_empty():
+		_toast("Nao consegui ler as imagens escolhidas.")
+		return
+	var n: int = doc.inserir_quadros(imgs)
+	_sincronizar()
+	_agendar_save()
+	_toast("%d quadro(s) importado(s)." % n)
 
 
 # --- exportar ---

@@ -23,6 +23,14 @@ func _initialize() -> void:
 	d.novo("Teste Forja", 32, 32)
 	_ok(d.sequencias.size() == Formato.SLOTS.size() + Formato.BOTOES.size(), "sequencias criadas")
 
+	# importar imagem de outro tamanho
+	var ext := Image.create(10, 20, false, Image.FORMAT_RGBA8)
+	ext.fill(Color.RED)
+	d.selecionar(1)
+	_ok(d.inserir_quadros([ext]) == 1, "importar 1 imagem")
+	_ok(d.imagem().get_width() == 32 and d.imagem().get_height() == 32, "imagem ajustada ao tamanho da arte")
+	_ok(d.imagem().get_pixel(16, 31) == Color.RED and d.imagem().get_pixel(0, 0).a == 0.0, "pés na base, centro na horizontal")
+
 	# desenhar + desfazer + refazer
 	d.direcao = "esquerda"
 	d.selecionar(0)

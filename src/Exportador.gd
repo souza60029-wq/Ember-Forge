@@ -98,7 +98,7 @@ static func montar_ember(doc: Variant) -> Dictionary:
 					frames.append(nome2)
 			g["frames"] = frames
 			golpes.append(g)
-	var p := {"formato": Formato.VERSAO, "id": doc.id, "nome": doc.nome, "altura_px": doc.altura_px,
+	var p := {"formato": Formato.VERSAO, "id": doc.id, "nome": doc.nome, "altura_px": doc.altura_px, "olhando": doc.direcao,
 		"sprites": sprites, "golpes": golpes, "magias": []}
 	var norm: Dictionary = Formato.normalizar(p)
 	if not bool(norm["ok"]):

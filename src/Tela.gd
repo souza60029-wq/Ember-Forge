@@ -136,6 +136,11 @@ func _draw() -> void:
 	var gx: float = origem.x + w * 0.5 * zoom
 	draw_line(Vector2(gx, r.end.y - 14.0), Vector2(gx, r.end.y), Estilo.DESTAQUE, 2.0)
 	draw_line(Vector2(gx - 8.0, r.end.y - 1.0), Vector2(gx + 8.0, r.end.y - 1.0), Estilo.DESTAQUE, 2.0)
+	# seta: para onde o sprite olha
+	var dir: float = -1.0 if doc.direcao == "esquerda" else 1.0
+	var ay: float = r.end.y - 8.0
+	draw_colored_polygon(PackedVector2Array([Vector2(gx + dir * 46.0, ay), Vector2(gx + dir * 26.0, ay - 10.0), Vector2(gx + dir * 26.0, ay + 10.0)]), Estilo.DESTAQUE)
+	draw_line(Vector2(gx + dir * 12.0, ay), Vector2(gx + dir * 28.0, ay), Estilo.DESTAQUE, 3.0)
 	if espelho:
 		draw_line(Vector2(gx, r.position.y), Vector2(gx, r.end.y), Color(1, 0.5, 0.2, 0.35), 1.0)
 	if doc.e_golpe():
@@ -152,13 +157,20 @@ func _fator() -> float:
 func _hitbox_para_pixels() -> Rect2:
 	var hb: Dictionary = doc.sequencia()["golpe"]["hitbox"]
 	var k: float = _fator()
-	return Rect2(float(doc.largura) * 0.5 + float(hb["x"]) / k, float(doc.altura) + float(hb["y"]) / k, float(hb["w"]) / k, float(hb["h"]) / k)
+	var x0: float = float(doc.largura) * 0.5 + float(hb["x"]) / k
+	if doc.direcao == "esquerda":
+		# a hitbox é guardada "para a frente"; se o sprite olha para a esquerda, a frente é a esquerda
+		x0 = float(doc.largura) * 0.5 - (float(hb["x"]) + float(hb["w"])) / k
+	return Rect2(x0, float(doc.altura) + float(hb["y"]) / k, float(hb["w"]) / k, float(hb["h"]) / k)
 
 
 func _pixels_para_hitbox(rp: Rect2) -> void:
 	var k: float = _fator()
 	var hb: Dictionary = doc.sequencia()["golpe"]["hitbox"]
-	hb["x"] = clampi(int(roundf((rp.position.x - float(doc.largura) * 0.5) * k)), -200, 200)
+	if doc.direcao == "esquerda":
+		hb["x"] = clampi(int(roundf((float(doc.largura) * 0.5 - (rp.position.x + rp.size.x)) * k)), -200, 200)
+	else:
+		hb["x"] = clampi(int(roundf((rp.position.x - float(doc.largura) * 0.5) * k)), -200, 200)
 	hb["y"] = clampi(int(roundf((rp.position.y - float(doc.altura)) * k)), -200, 0)
 	hb["w"] = clampi(int(roundf(rp.size.x * k)), 1, 300)
 	hb["h"] = clampi(int(roundf(rp.size.y * k)), 1, 300)

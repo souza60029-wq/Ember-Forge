@@ -24,6 +24,7 @@ func _initialize() -> void:
 	_ok(d.sequencias.size() == Formato.SLOTS.size() + Formato.BOTOES.size(), "sequencias criadas")
 
 	# desenhar + desfazer + refazer
+	d.direcao = "esquerda"
 	d.selecionar(0)
 	var img: Image = d.imagem()
 	var antes: PackedByteArray = img.get_data()
@@ -86,6 +87,7 @@ func _initialize() -> void:
 	var norm: Dictionary = Formato.normalizar(pj)
 	_ok(bool(norm["ok"]), "engine aceita o personagem")
 	var p: Dictionary = norm["personagem"]
+	_ok(str(p["olhando"]) == "esquerda", "direcao do sprite exportada")
 	var parado: Array = p["sprites"]["parado"]
 	_ok(parado.size() == 3, "tres sprites em 'parado'")
 	for nome in parado:
@@ -103,6 +105,7 @@ func _initialize() -> void:
 	_ok(d.salvar() == "", "salvar projeto")
 	var d2 := Documento.new()
 	_ok(d2.abrir(d.id), "abrir projeto")
+	_ok(d2.direcao == "esquerda", "direcao salva")
 	_ok(d2.sequencias.size() == d.sequencias.size(), "mesmas sequencias")
 	_ok(d2.sequencias[0]["quadros"].size() == 3, "mesmos quadros")
 	_ok((d2.sequencias[0]["quadros"][0] as Image).get_pixel(3, 4) == Color.RED, "pixel salvo")

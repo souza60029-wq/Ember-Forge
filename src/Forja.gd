@@ -14,6 +14,7 @@ const Exportador = preload("res://src/Exportador.gd")
 const Formato = preload("res://src/Formato.gd")
 
 const FPS_OPCOES := [4, 6, 8, 12, 16, 24]
+const SESSAO := "user://forja/sessao.json"
 
 var doc: Variant = null
 var tela: Tela = null
@@ -38,6 +39,7 @@ var _botoes_tog := {}
 var _btn_play: Boto = null
 var _btn_fps: Boto = null
 var _exp_status: Label = null
+var _vista_salva := {}
 
 
 func _ready() -> void:
@@ -66,7 +68,7 @@ func _ready() -> void:
 	add_child(_tmr_play)
 	_tmr_save = Timer.new()
 	_tmr_save.one_shot = true
-	_tmr_save.wait_time = 1.5
+	_tmr_save.wait_time = 0.6
 	_tmr_save.timeout.connect(_salvar)
 	add_child(_tmr_save)
 	_tmr_toast = Timer.new()
@@ -75,11 +77,13 @@ func _ready() -> void:
 	_tmr_toast.timeout.connect(_esconder_toast)
 	add_child(_tmr_toast)
 	get_viewport().size_changed.connect(_ao_redimensionar)
+	_restaurar_sessao()
 	_recarregar_tudo()
+	_aplicar_vista_salva.call_deferred()
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_CLOSE_REQUEST:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		_salvar()
 
 
@@ -178,7 +182,7 @@ func _montar() -> void:
 	var togs: Array = [_btn_tog("espelho"), _btn_tog("grade"), _btn_tog("cebola"), _btn_tog("pincel")]
 	var acoes: Array = [
 		_b("desfazer", _desfazer), _b("refazer", _refazer), _b("ajustar", _ajustar_vista),
-		_b("olho", _alternar_limpo), _b("pessoa", _abrir_sequencias), _b("exportar", _abrir_exportar), _b("projeto", _abrir_projeto)]
+		_b("olho", _alternar_limpo), _b("pessoa", _abrir_sequencias), _b("salvar", _salvar_manual), _b("exportar", _abrir_exportar), _b("projeto", _abrir_projeto)]
 
 	var centro := VBoxContainer.new()
 	centro.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -273,6 +277,7 @@ func _escolher_ferr(id: String) -> void:
 		return
 	_ferr = id
 	tela.ferramenta = id
+	_agendar_save()
 	for k in _botoes_ferr.keys():
 		(_botoes_ferr[k] as Boto).ativo = (k == id)
 	tela.queue_redraw()
@@ -295,6 +300,7 @@ func _alternar(nome: String) -> void:
 			(_botoes_tog["pincel"] as Boto).extra = tela.tam_pincel
 			(_botoes_tog["pincel"] as Boto).queue_redraw()
 	tela.queue_redraw()
+	_agendar_save()
 
 
 func _desfazer() -> void:
@@ -321,6 +327,7 @@ func _alternar_limpo() -> void:
 
 func _ao_escolher_cor(i: int) -> void:
 	_cor_i = i
+	_agendar_save()
 	paleta.definir(doc.paleta, i)
 	tela.cor = doc.paleta[i]
 	if _ferr == "borracha" or _ferr == "mao" or _ferr == "hitbox":
@@ -493,10 +500,59 @@ func _agendar_save() -> void:
 
 
 func _salvar() -> void:
-	if doc != null and doc.sujo:
+	if doc == null:
+		return
+	if doc.sujo:
 		var erro: String = doc.salvar()
 		if erro != "":
 			_toast(erro)
+	_salvar_sessao()
+
+
+# Guarda o estado do app (ferramenta, cor, zoom...) para reabrir exatamente como estava.
+func _salvar_sessao() -> void:
+	var vp: Vector2 = get_viewport_rect().size
+	var d := {"id": doc.id, "ferr": _ferr, "cor": _cor_i, "espelho": tela.espelho, "grade": tela.grade,
+		"cebola": tela.cebola, "pincel": tela.tam_pincel, "cheio": tela.cheio, "zoom": tela.zoom,
+		"ox": tela.origem.x, "oy": tela.origem.y, "auto": tela._auto_ajuste, "vp": [vp.x, vp.y]}
+	DirAccess.make_dir_recursive_absolute("user://forja/")
+	var f := FileAccess.open(SESSAO, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(d))
+		f.close()
+
+
+func _restaurar_sessao() -> void:
+	if not FileAccess.file_exists(SESSAO):
+		return
+	var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(SESSAO))
+	if typeof(d) != TYPE_DICTIONARY or str((d as Dictionary).get("id", "")) != doc.id:
+		return
+	var s: Dictionary = d
+	_ferr = str(s.get("ferr", "lapis"))
+	if _ferr == "hitbox" and not doc.e_golpe():
+		_ferr = "lapis"
+	_cor_i = clampi(int(s.get("cor", 3)), 0, doc.paleta.size() - 1)
+	tela.espelho = bool(s.get("espelho", false))
+	tela.grade = bool(s.get("grade", false))
+	tela.cebola = bool(s.get("cebola", false))
+	tela.tam_pincel = clampi(int(s.get("pincel", 1)), 1, 4)
+	tela.cheio = bool(s.get("cheio", false))
+	_vista_salva = s
+
+
+func _aplicar_vista_salva() -> void:
+	var s: Dictionary = _vista_salva
+	_vista_salva = {}
+	if s.is_empty() or bool(s.get("auto", true)):
+		return
+	var vp: Vector2 = get_viewport_rect().size
+	var v: Array = s.get("vp", [])
+	if v.size() == 2 and absf(float(v[0]) - vp.x) < 2.0 and absf(float(v[1]) - vp.y) < 2.0:
+		tela.zoom = float(s.get("zoom", tela.zoom))
+		tela.origem = Vector2(float(s.get("ox", 0.0)), float(s.get("oy", 0.0)))
+		tela._auto_ajuste = false
+		tela.queue_redraw()
 
 
 # ---------- painéis ----------
@@ -569,6 +625,19 @@ func _abrir_sequencias() -> void:
 	nome.text_changed.connect(_ao_nome)
 	c.add_child(nome)
 	_stepper(c, "Altura do corpo (px)", doc.altura_px, 2, 8, 600, _ao_altura)
+	c.add_child(_rotulo("Todos os quadros olham para:", Estilo.SUAVE))
+	var dh := HBoxContainer.new()
+	dh.add_theme_constant_override("separation", int(_u * 0.1))
+	var bdir: Array = []
+	for par in [["esquerda", "esq", "Esquerda"], ["direita", "dir", "Direita"]]:
+		var bt := _b(str(par[1]), Callable(), str(par[2]))
+		bt.custom_minimum_size = Vector2(0, _u * 1.1)
+		bt.ativo = (doc.direcao == str(par[0]))
+		bdir.append(bt)
+		dh.add_child(bt)
+	(bdir[0] as Boto).pressionado.connect(_set_direcao.bind("esquerda", bdir))
+	(bdir[1] as Boto).pressionado.connect(_set_direcao.bind("direita", bdir))
+	c.add_child(dh)
 	c.add_child(_rotulo("Animações", Estilo.SUAVE))
 	for i in range(doc.sequencias.size()):
 		var s: Dictionary = doc.sequencias[i]
@@ -600,6 +669,14 @@ func _linha_seq(i: int) -> Control:
 		b.textura = ImageTexture.create_from_image(q[0])
 		b.sub = str(q.size())
 	return b
+
+
+func _set_direcao(d: String, botoes: Array) -> void:
+	doc.direcao = d
+	(botoes[0] as Boto).ativo = (d == "esquerda")
+	(botoes[1] as Boto).ativo = (d == "direita")
+	tela.queue_redraw()
+	_agendar_save()
 
 
 func _ao_nome(t: String) -> void:

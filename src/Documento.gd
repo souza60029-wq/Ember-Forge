@@ -20,6 +20,7 @@ var nome: String = "Novo personagem"
 var largura: int = 64
 var altura: int = 64
 var altura_px: int = 52
+var direcao: String = "direita"   # para onde o sprite olha em TODOS os quadros: "direita" ou "esquerda"
 var paleta: PackedColorArray = PackedColorArray()
 var sequencias: Array = []
 var seq: int = 0
@@ -29,6 +30,7 @@ var sujo: bool = false
 var _undo: Array = []
 var _redo: Array = []
 var _tudo_sujo: bool = true
+var _sujos := {}
 
 
 func novo(p_nome: String, w: int, h: int) -> void:
@@ -37,6 +39,7 @@ func novo(p_nome: String, w: int, h: int) -> void:
 	largura = clampi(w, 8, 512)
 	altura = clampi(h, 8, 512)
 	altura_px = int(float(altura) * 0.8)
+	direcao = "direita"
 	paleta = PackedColorArray()
 	for h_ in PALETA_PADRAO:
 		paleta.append(Color(str(h_)))
@@ -168,6 +171,7 @@ func mover_quadro(d: int) -> void:
 # ---------- desfazer / refazer ----------
 
 func empurrar_undo(dados_antes: PackedByteArray) -> void:
+	_sujos["%d_%d" % [seq, quadro]] = true
 	_undo.append({"s": seq, "q": quadro, "d": dados_antes})
 	if _undo.size() > MAX_UNDO:
 		_undo.pop_front()
@@ -199,6 +203,7 @@ func _trocar(de: Array, para: Array) -> bool:
 	img.set_data(largura, altura, false, Image.FORMAT_RGBA8, e["d"])
 	seq = s
 	quadro = q
+	_sujos["%d_%d" % [s, q]] = true
 	marcar_sujo()
 	return true
 
@@ -230,12 +235,12 @@ func salvar() -> String:
 		meta_seqs.append({"id": s["id"], "tipo": s["tipo"], "nome": s["nome"], "fps": s["fps"], "golpe": s["golpe"], "n": q.size()})
 		for j in range(q.size()):
 			var arq: String = pasta + "s%d_q%d.png" % [i, j]
-			if _tudo_sujo or not FileAccess.file_exists(arq) or (i == seq and j == quadro):
+			if _tudo_sujo or not FileAccess.file_exists(arq) or _sujos.has("%d_%d" % [i, j]) or (i == seq and j == quadro):
 				(q[j] as Image).save_png(arq)
 	var cores: Array = []
 	for c in paleta:
 		cores.append(c.to_html(false))
-	var meta := {"id": id, "nome": nome, "largura": largura, "altura": altura, "altura_px": altura_px,
+	var meta := {"id": id, "nome": nome, "largura": largura, "altura": altura, "altura_px": altura_px, "direcao": direcao,
 		"paleta": cores, "seq": seq, "quadro": quadro, "sequencias": meta_seqs}
 	var f := FileAccess.open(pasta + "projeto.json", FileAccess.WRITE)
 	if f == null:
@@ -247,6 +252,7 @@ func salvar() -> String:
 		u.store_string(id)
 		u.close()
 	_tudo_sujo = false
+	_sujos.clear()
 	sujo = false
 	return ""
 
@@ -264,6 +270,7 @@ func abrir(p_id: String) -> bool:
 	largura = clampi(int(m.get("largura", 64)), 8, 512)
 	altura = clampi(int(m.get("altura", 64)), 8, 512)
 	altura_px = clampi(int(m.get("altura_px", 52)), 8, 600)
+	direcao = "esquerda" if str(m.get("direcao", "direita")) == "esquerda" else "direita"
 	paleta = PackedColorArray()
 	for h_ in m.get("paleta", PALETA_PADRAO):
 		paleta.append(Color(str(h_)))

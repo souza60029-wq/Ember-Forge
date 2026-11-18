@@ -207,6 +207,7 @@ static func normalizar(dados) -> Dictionary:
 			"id": sanitizar_id(str(dados.get("id", nome))),
 			"nome": nome,
 			"altura_px": clampi(int(dados.get("altura_px", ALTURA_PADRAO)), 40, 600),
+			"olhando": "esquerda" if str(dados.get("olhando", "direita")) == "esquerda" else "direita",
 			"arte_selecao": str(dados.get("arte_selecao", "")),
 			"arte_card": str(dados.get("arte_card", "")),
 			"sprites": _sprites(dados.get("sprites", {})),

@@ -167,7 +167,8 @@ func _item(icone: String, rotulo: String, cb: Callable, ativo: bool = false) -> 
 
 func _legenda() -> String:
 	var s: Dictionary = doc.sequencia()
-	return "%s   %d/%d" % [str(s["nome"]), doc.quadro + 1, doc.quadros().size()]
+	var im: Image = doc.imagem()
+	return "%s   %d/%d   %d×%d" % [str(s["nome"]), doc.quadro + 1, doc.quadros().size(), im.get_width(), im.get_height()]
 
 
 func _soltar_persistentes() -> void:

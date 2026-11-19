@@ -13,11 +13,19 @@ const Documento = preload("res://src/Documento.gd")
 const Exportador = preload("res://src/Exportador.gd")
 const Formato = preload("res://src/Formato.gd")
 const Seletor = preload("res://src/Seletor.gd")
+const Rolagem = preload("res://src/Rolagem.gd")
 
 const FPS_OPCOES := [4, 6, 8, 12, 16, 24]
 const FERR_PINCEL := ["lapis", "borracha"]
 const FERR_FORMA := ["linha", "retangulo"]
 const SESSAO := "user://forja/sessao.json"
+const ROT_CURTO := {
+	"parado": "Parado", "andando": "Andando", "pulando": "Pulando", "defendendo": "Defesa",
+	"bloqueio": "Bloqueou", "parry": "Parry", "guarda_quebrada": "G. quebrada", "esquiva": "Esquiva",
+	"golpeado_alto": "Hit alto", "golpeado_medio": "Hit meio", "golpeado_baixo": "Hit baixo",
+	"rasteira": "Rasteira", "caido": "Caído", "levantando": "Levantando", "ko": "K.O.",
+	"vitoria": "Vitória", "derrota": "Derrota",
+}
 
 var doc: Variant = null
 var tela: Tela = null
@@ -44,6 +52,10 @@ var _paisagem: bool = false
 var _ult_pincel: String = "lapis"
 var _ult_forma: String = "retangulo"
 var _pend_imgs: Array = []
+var _inicio: Control = null
+var _modo_inicio: bool = false
+var _modo_import: String = ""
+var _doc_temp: bool = false
 var _btn_play: Boto = null
 var _btn_fps: Boto = null
 var _exp_status: Label = null
@@ -58,6 +70,7 @@ func _ready() -> void:
 	var ult: String = Documento.ultimo_id()
 	if ult == "" or not doc.abrir(ult):
 		doc.novo("Novo personagem", 64, 64)
+		_doc_temp = true
 	tela = Tela.new()
 	tela.doc = doc
 	tela.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -93,6 +106,7 @@ func _ready() -> void:
 	_restaurar_sessao()
 	_recarregar_tudo()
 	_aplicar_vista_salva.call_deferred()
+	_mostrar_inicio.call_deferred()
 
 
 func _notification(what: int) -> void:
@@ -529,6 +543,7 @@ func _abrir_cor(i: int) -> void:
 	pk.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var atual: Color = doc.paleta[i] if i >= 0 else tela.cor
 	pk.definir(atual)
+	pk.set_meta("sem_rolar", true)
 	c.add_child(pk)
 	var linha := HBoxContainer.new()
 	linha.add_theme_constant_override("separation", int(_u * 0.12))
@@ -674,7 +689,7 @@ func _agendar_save() -> void:
 func _salvar() -> void:
 	if doc == null:
 		return
-	if doc.sujo:
+	if doc.sujo and not _doc_temp:
 		var erro: String = doc.salvar()
 		if erro != "":
 			_toast(erro)
@@ -739,11 +754,19 @@ func _aplicar_vista_salva() -> void:
 func _nova_folha(titulo: String) -> Variant:
 	if _folha != null and is_instance_valid(_folha):
 		_folha.queue_free()
+	if _modo_inicio and _inicio != null and is_instance_valid(_inicio):
+		_inicio.visible = false
 	var f := Folha.new()
 	add_child(f)
 	f.configurar(titulo, _u, get_viewport_rect().size)
+	f.fechada.connect(_ao_folha_fechada)
 	_folha = f
 	return f
+
+
+func _ao_folha_fechada() -> void:
+	if _modo_inicio and _inicio != null and is_instance_valid(_inicio):
+		_inicio.visible = true
 
 
 func _fechar_folha() -> void:
@@ -800,64 +823,94 @@ func _passo(v: Label, delta: int, mn: int, mx: int, cb: Callable) -> void:
 	cb.call(novo)
 
 
-# --- personagem: animações e golpes ---
+# --- personagem: estados e golpes ---
+
+func _grade_tiles() -> HFlowContainer:
+	var g := HFlowContainer.new()
+	g.add_theme_constant_override("h_separation", int(_u * 0.1))
+	g.add_theme_constant_override("v_separation", int(_u * 0.1))
+	return g
+
+
+func _campo(dica: String, texto: String) -> LineEdit:
+	var e := LineEdit.new()
+	e.placeholder_text = dica
+	e.text = texto
+	e.custom_minimum_size = Vector2(0, _u * 0.85)
+	e.add_theme_font_size_override("font_size", int(_u * 0.34))
+	return e
+
+
+func _icone_seq(s: Dictionary) -> String:
+	if str(s["tipo"]) == "slot":
+		return "slot_" + str(s["id"])
+	var g: Dictionary = s["golpe"]
+	if bool(g.get("base", false)):
+		return "golpe_" + str(g["botao"]).to_lower()
+	return "golpe_custom"
+
+
+# Um estado/golpe como quadradinho: miniatura (ou ícone) em cima, nome embaixo.
+func _tile_seq(i: int, cb: Callable = Callable()) -> Boto:
+	var s: Dictionary = doc.sequencias[i]
+	var acao: Callable = cb if cb.is_valid() else _escolher_seq.bind(i)
+	var nome: String = str(ROT_CURTO.get(str(s["id"]), str(s["nome"])))
+	var b := Boto.new(_icone_seq(s), nome)
+	b.custom_minimum_size = Vector2(_u * 1.3, _u * 1.4)
+	b.tam_fonte = int(_u * 0.2)
+	b.ativo = (i == doc.seq)
+	b.pressionado.connect(acao)
+	var q: Array = s["quadros"]
+	if not q.is_empty():
+		b.textura = ImageTexture.create_from_image(q[0])
+		b.sub = str(q.size())
+	return b
+
+
+func _tile_novo_golpe() -> Boto:
+	var b := Boto.new("golpe_novo", "Novo golpe")
+	b.custom_minimum_size = Vector2(_u * 1.3, _u * 1.4)
+	b.tam_fonte = int(_u * 0.2)
+	b.pressionado.connect(_novo_golpe)
+	return b
+
 
 func _abrir_sequencias() -> void:
 	var f: Variant = _nova_folha("Personagem")
 	var c: VBoxContainer = f.conteudo
-	c.add_child(_linha("Importar sprites (vários de uma vez)", "importar", _abrir_importar))
-	var nome := LineEdit.new()
-	nome.text = doc.nome
-	nome.custom_minimum_size = Vector2(0, _u)
-	nome.add_theme_font_size_override("font_size", int(_u * 0.4))
+	var nome := _campo("Nome do personagem", doc.nome)
 	nome.text_changed.connect(_ao_nome)
 	c.add_child(nome)
 	_stepper(c, "Altura do corpo (px)", doc.altura_px, 2, 8, 600, _ao_altura)
-	c.add_child(_rotulo("Todos os quadros olham para:", Estilo.SUAVE))
+	c.add_child(_rotulo("Todos os quadros olham para:", Estilo.SUAVE, 0.3))
 	var dh := HBoxContainer.new()
 	dh.add_theme_constant_override("separation", int(_u * 0.1))
 	var bdir: Array = []
 	for par in [["esquerda", "esq", "Esquerda"], ["direita", "dir", "Direita"]]:
 		var bt := _b(str(par[1]), Callable(), str(par[2]))
-		bt.custom_minimum_size = Vector2(0, _u * 1.1)
+		bt.custom_minimum_size = Vector2(0, _u)
 		bt.ativo = (doc.direcao == str(par[0]))
 		bdir.append(bt)
 		dh.add_child(bt)
 	(bdir[0] as Boto).pressionado.connect(_set_direcao.bind("esquerda", bdir))
 	(bdir[1] as Boto).pressionado.connect(_set_direcao.bind("direita", bdir))
 	c.add_child(dh)
-	c.add_child(_rotulo("Animações", Estilo.SUAVE))
+	c.add_child(_linha("Importar sprites", "importar", _abrir_importar))
+	c.add_child(_rotulo("Estados", Estilo.SUAVE, 0.3))
+	var g1 := _grade_tiles()
 	for i in range(doc.sequencias.size()):
-		var s: Dictionary = doc.sequencias[i]
-		if str(s["tipo"]) != "slot":
-			continue
-		c.add_child(_linha_seq(i))
-	c.add_child(_rotulo("Golpes", Estilo.SUAVE))
+		if str(doc.sequencias[i]["tipo"]) == "slot":
+			g1.add_child(_tile_seq(i))
+	c.add_child(g1)
+	c.add_child(_rotulo("Golpes", Estilo.SUAVE, 0.3))
+	var g2 := _grade_tiles()
 	for i in range(doc.sequencias.size()):
-		var s2: Dictionary = doc.sequencias[i]
-		if str(s2["tipo"]) != "golpe":
-			continue
-		var h := HBoxContainer.new()
-		h.add_theme_constant_override("separation", int(_u * 0.1))
-		var r: Control = _linha_seq(i)
-		h.add_child(r)
-		var g := _b("engrenagem", _abrir_ficha.bind(i))
-		g.size_flags_horizontal = Control.SIZE_SHRINK_END
-		g.custom_minimum_size = Vector2(_u * 1.1, _u * 1.1)
-		h.add_child(g)
-		c.add_child(h)
-	c.add_child(_linha("Novo golpe", "mais", _novo_golpe))
-
-
-func _linha_seq(i: int, cb: Callable = Callable()) -> Control:
-	var s: Dictionary = doc.sequencias[i]
-	var acao: Callable = cb if cb.is_valid() else _escolher_seq.bind(i)
-	var b := _linha(str(s["nome"]), "quadros", acao, i == doc.seq) as Boto
-	var q: Array = s["quadros"]
-	if not q.is_empty():
-		b.textura = ImageTexture.create_from_image(q[0])
-		b.sub = str(q.size())
-	return b
+		if str(doc.sequencias[i]["tipo"]) == "golpe":
+			g2.add_child(_tile_seq(i))
+	g2.add_child(_tile_novo_golpe())
+	c.add_child(g2)
+	if doc.e_golpe():
+		c.add_child(_linha("Ajustar golpe: " + str(doc.sequencia()["nome"]), "engrenagem", _abrir_ficha.bind(doc.seq)))
 
 
 func _set_direcao(d: String, botoes: Array) -> void:
@@ -899,10 +952,7 @@ func _abrir_ficha(i: int) -> void:
 	var g: Dictionary = s["golpe"]
 	var f: Variant = _nova_folha("Golpe")
 	var c: VBoxContainer = f.conteudo
-	var nome := LineEdit.new()
-	nome.text = str(g["nome"])
-	nome.custom_minimum_size = Vector2(0, _u)
-	nome.add_theme_font_size_override("font_size", int(_u * 0.4))
+	var nome := _campo("Nome do golpe", str(g["nome"]))
 	nome.text_changed.connect(_ao_nome_golpe.bind(i))
 	c.add_child(nome)
 	var botoes := HBoxContainer.new()
@@ -976,14 +1026,25 @@ func _apagar_golpe(i: int) -> void:
 
 
 # --- importar sprites ---
-# Fluxo: escolher origem (galeria/arquivos, vários de uma vez) -> dizer para qual ação ou golpe vão.
+# Duas entradas: (1) personagem novo, vindo da tela inicial: a arte nasce com a resolução dos sprites;
+# (2) sprites para o personagem aberto: o botão Importar do topo.
 
 func _abrir_importar() -> void:
+	_modo_import = ""
 	var f: Variant = _nova_folha("Importar sprites")
 	var c: VBoxContainer = f.conteudo
 	c.add_child(_linha("Galeria de fotos", "png", _pedir_import.bind("galeria")))
 	c.add_child(_linha("Explorador de arquivos", "projeto", _pedir_import.bind("arquivos")))
-	c.add_child(_rotulo("Escolha vários sprites de uma vez. Depois você diz para qual ação ou golpe eles vão (andando, soco, um golpe novo...). Cada imagem vira um quadro, ajustada ao tamanho da arte (pés na base).", Estilo.SUAVE, 0.28))
+	c.add_child(_rotulo("Escolha vários sprites de uma vez. Depois você diz para qual estado ou golpe eles vão. Cada imagem vira um quadro.", Estilo.SUAVE, 0.28))
+
+
+func _abrir_importar_novo() -> void:
+	_modo_import = "novo"
+	var f: Variant = _nova_folha("Importar personagem")
+	var c: VBoxContainer = f.conteudo
+	c.add_child(_linha("Galeria de fotos", "png", _pedir_import.bind("galeria")))
+	c.add_child(_linha("Explorador de arquivos", "projeto", _pedir_import.bind("arquivos")))
+	c.add_child(_rotulo("Escolha todos os sprites do personagem de uma vez. A arte do personagem vai ter a mesma resolução dos sprites.", Estilo.SUAVE, 0.28))
 
 
 func _pedir_import(origem: String) -> void:
@@ -998,32 +1059,107 @@ func _ao_importar(caminhos: PackedStringArray) -> void:
 	for c in lista:
 		var im: Image = Image.load_from_file(str(c))
 		if im != null and not im.is_empty():
+			im.convert(Image.FORMAT_RGBA8)
 			imgs.append(im)
 	if imgs.is_empty():
 		_toast("Nao consegui ler as imagens escolhidas.")
 		return
 	_pend_imgs = imgs
+	if _modo_import == "novo":
+		_abrir_form_importado()
+	else:
+		_abrir_destino()
+
+
+# Resolução do personagem importado = a dos sprites (se forem de tamanhos diferentes, a do maior).
+func _abrir_form_importado() -> void:
+	var tw: int = 0
+	var th: int = 0
+	var mistura: bool = false
+	var w0: int = (_pend_imgs[0] as Image).get_width()
+	var h0: int = (_pend_imgs[0] as Image).get_height()
+	for im in _pend_imgs:
+		var w: int = (im as Image).get_width()
+		var h: int = (im as Image).get_height()
+		tw = maxi(tw, w)
+		th = maxi(th, h)
+		if w != w0 or h != h0:
+			mistura = true
+	var f: Variant = _nova_folha("Personagem importado")
+	var c: VBoxContainer = f.conteudo
+	var nome := _campo("Nome do personagem", "")
+	c.add_child(nome)
+	c.add_child(_rotulo("%d sprites" % _pend_imgs.size(), Estilo.SUAVE, 0.3))
+	c.add_child(_rotulo("Resolução: %d × %d px" % [tw, th], Estilo.DESTAQUE, 0.42))
+	if mistura:
+		c.add_child(_rotulo("Os sprites têm tamanhos diferentes. A arte usa o maior; os menores ficam centralizados, com os pés na base, sem esticar.", Estilo.SUAVE, 0.26))
+	if tw > 512 or th > 512:
+		c.add_child(_rotulo("O máximo é 512 px: acima disso a arte será reduzida.", Estilo.SUAVE, 0.26))
+	c.add_child(_linha("Continuar", "check", _confirmar_importado.bind(nome, tw, th)))
+
+
+# Cola o sprite no centro/base de uma tela W x H, sem esticar.
+func _encaixar(im: Image, w: int, h: int) -> Image:
+	var iw: int = im.get_width()
+	var ih: int = im.get_height()
+	if (iw == w and ih == h) or iw > w or ih > h:
+		return im
+	var saida: Image = Image.create(w, h, false, Image.FORMAT_RGBA8)
+	saida.blit_rect(im, Rect2i(0, 0, iw, ih), Vector2i((w - iw) / 2, h - ih))
+	return saida
+
+
+func _confirmar_importado(nome_ed: LineEdit, tw: int, th: int) -> void:
+	var nome: String = nome_ed.text.strip_edges()
+	if nome == "":
+		nome = "Personagem"
+	var corpo: int = 0
+	for im in _pend_imgs:
+		corpo = maxi(corpo, (im as Image).get_used_rect().size.y)
+	_modo_inicio = false
+	_fechar_folha()
+	_salvar()
+	doc.novo(nome, tw, th)
+	_doc_temp = false
+	if corpo > 0:
+		doc.altura_px = clampi(corpo, 8, 600)
+	var enc: Array = []
+	for im in _pend_imgs:
+		enc.append(_encaixar(im as Image, doc.largura, doc.altura))
+	_pend_imgs = enc
+	_gaveta = ""
+	_ferr = "lapis"
+	_entrar_editor()
+	_recarregar_tudo()
+	_agendar_save()
 	_abrir_destino()
 
 
 func _abrir_destino() -> void:
 	var f: Variant = _nova_folha("Destino (%d sprites)" % _pend_imgs.size())
 	var c: VBoxContainer = f.conteudo
-	c.add_child(_rotulo("Golpe novo", Estilo.SUAVE))
-	var ed := LineEdit.new()
-	ed.placeholder_text = "Nome do golpe (ex: Hadouken)"
-	ed.custom_minimum_size = Vector2(0, _u)
-	ed.add_theme_font_size_override("font_size", int(_u * 0.4))
-	c.add_child(ed)
-	c.add_child(_linha("Criar golpe e importar", "mais", _import_novo_golpe.bind(ed)))
-	c.add_child(_rotulo("Ações do personagem", Estilo.SUAVE))
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", int(_u * 0.1))
+	var ed := _campo("Golpe novo: escreva o nome", "")
+	ed.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(ed)
+	var ok := _b("check", _import_novo_golpe.bind(ed))
+	ok.custom_minimum_size = Vector2(_u * 0.85, _u * 0.85)
+	ok.size_flags_horizontal = Control.SIZE_SHRINK_END
+	h.add_child(ok)
+	c.add_child(h)
+	c.add_child(_rotulo("Estados", Estilo.SUAVE, 0.3))
+	var g1 := _grade_tiles()
 	for i in range(doc.sequencias.size()):
 		if str(doc.sequencias[i]["tipo"]) == "slot":
-			c.add_child(_linha_seq(i, _import_para.bind(i)))
-	c.add_child(_rotulo("Golpes", Estilo.SUAVE))
+			g1.add_child(_tile_seq(i, _import_para.bind(i)))
+	c.add_child(g1)
+	c.add_child(_rotulo("Golpes", Estilo.SUAVE, 0.3))
+	var g2 := _grade_tiles()
 	for i in range(doc.sequencias.size()):
 		if str(doc.sequencias[i]["tipo"]) == "golpe":
-			c.add_child(_linha_seq(i, _import_para.bind(i)))
+			g2.add_child(_tile_seq(i, _import_para.bind(i)))
+	c.add_child(g2)
 
 
 func _import_novo_golpe(ed: LineEdit) -> void:
@@ -1035,11 +1171,15 @@ func _import_novo_golpe(ed: LineEdit) -> void:
 	_import_para(i)
 
 
-# Os sprites entram no fim dos quadros da ação/golpe escolhido.
+# Os sprites entram no fim dos quadros do estado/golpe escolhido.
 func _import_para(i: int) -> void:
 	_fechar_folha()
 	if _pend_imgs.is_empty():
 		return
+	var diferente: bool = false
+	for im in _pend_imgs:
+		if (im as Image).get_width() != doc.largura or (im as Image).get_height() != doc.altura:
+			diferente = true
 	doc.selecionar(i)
 	doc.ir_quadro(doc.quadros().size() - 1)
 	var n: int = doc.inserir_quadros(_pend_imgs)
@@ -1049,7 +1189,10 @@ func _import_para(i: int) -> void:
 	_montar()
 	_sincronizar()
 	_agendar_save()
-	_toast("%d quadro(s) em %s." % [n, str(doc.sequencia()["nome"])])
+	var msg: String = "%d quadro(s) em %s." % [n, str(doc.sequencia()["nome"])]
+	if diferente:
+		msg += " Alguns sprites tinham outra resolução e foram ajustados."
+	_toast(msg)
 
 
 # --- exportar ---
@@ -1076,25 +1219,15 @@ func _abrir_salvar() -> void:
 	var f: Variant = _nova_folha("Salvar e exportar")
 	var c: VBoxContainer = f.conteudo
 	c.add_child(_linha("Salvar agora", "salvar", _salvar_manual))
-	c.add_child(_rotulo("Exportar", Estilo.SUAVE))
+	c.add_child(_rotulo("Exportar", Estilo.SUAVE, 0.3))
 	c.add_child(_linha("PNG do quadro", "png", _exportar.bind("png")))
 	c.add_child(_linha("PNG folha de sprites", "quadros", _exportar.bind("folha")))
 	c.add_child(_linha("GIF da animação", "gif", _exportar.bind("gif")))
 	c.add_child(_linha("Personagem (.ember)", "ember", _exportar.bind("ember")))
 	_exp_status = _rotulo("", Estilo.SUAVE, 0.3)
 	c.add_child(_exp_status)
-	c.add_child(_rotulo("Novo personagem (tamanho da arte)", Estilo.SUAVE))
-	var h := HFlowContainer.new()
-	h.add_theme_constant_override("h_separation", int(_u * 0.08))
-	h.add_theme_constant_override("v_separation", int(_u * 0.08))
-	for n in [32, 48, 64, 96, 128, 192]:
-		h.add_child(_b("", _novo_projeto.bind(int(n)), str(n)))
-	c.add_child(h)
-	var lista: Array = Documento.listar_projetos()
-	if not lista.is_empty():
-		c.add_child(_rotulo("Abrir personagem", Estilo.SUAVE))
-		for p in lista:
-			c.add_child(_linha(str(p["nome"]), "pessoa", _abrir_projeto_id.bind(str(p["id"])), str(p["id"]) == doc.id))
+	c.add_child(_rotulo("Personagens", Estilo.SUAVE, 0.3))
+	c.add_child(_linha("Início: novo ou abrir outro", "inicio", _mostrar_inicio))
 
 
 func _salvar_manual() -> void:
@@ -1103,25 +1236,147 @@ func _salvar_manual() -> void:
 	_toast("Projeto salvo.")
 
 
-func _novo_projeto(n: int) -> void:
-	_salvar()
-	doc.novo("Novo personagem", n, n)
-	_ferr = "lapis"
-	if _folha != null:
-		_folha.fechar()
-	_recarregar_tudo()
-	_agendar_save()
-
-
 func _abrir_projeto_id(id: String) -> void:
 	_salvar()
 	if doc.abrir(id):
+		_doc_temp = false
+		_gaveta = ""
 		_ferr = "lapis"
-		if _folha != null:
-			_folha.fechar()
+		_modo_inicio = false
+		_fechar_folha()
+		_entrar_editor()
 		_recarregar_tudo()
 	else:
 		_toast("Nao consegui abrir esse projeto.")
+
+
+# ---------- tela inicial ----------
+
+func _margem_segura() -> Dictionary:
+	var m := {"left": 0, "top": 0, "right": 0, "bottom": 0}
+	if OS.has_feature("mobile"):
+		var seg: Rect2i = DisplayServer.get_display_safe_area()
+		var ja: Vector2i = DisplayServer.window_get_size()
+		m["left"] = maxi(seg.position.x, 0)
+		m["top"] = maxi(seg.position.y, 0)
+		m["right"] = maxi(ja.x - seg.end.x, 0)
+		m["bottom"] = maxi(ja.y - seg.end.y, 0)
+	return m
+
+
+func _mostrar_inicio() -> void:
+	_fechar_folha()
+	if _inicio != null and is_instance_valid(_inicio):
+		_inicio.queue_free()
+	_modo_import = ""
+	var vp: Vector2 = get_viewport_rect().size
+	_inicio = Control.new()
+	_inicio.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_inicio.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_inicio)
+	var fundo := ColorRect.new()
+	fundo.color = Estilo.FUNDO
+	fundo.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	fundo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inicio.add_child(fundo)
+	var m: Dictionary = _margem_segura()
+	var lado: int = int(maxf(_u * 0.3, (vp.x - 760.0) * 0.5))
+	var margem := MarginContainer.new()
+	margem.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margem.add_theme_constant_override("margin_left", int(m["left"]) + lado)
+	margem.add_theme_constant_override("margin_right", int(m["right"]) + lado)
+	margem.add_theme_constant_override("margin_top", int(m["top"]) + int(_u * 0.4))
+	margem.add_theme_constant_override("margin_bottom", int(m["bottom"]) + int(_u * 0.3))
+	_inicio.add_child(margem)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", int(_u * 0.2))
+	margem.add_child(col)
+	col.add_child(_rotulo("Ember Forja", Estilo.DESTAQUE, 0.7))
+	col.add_child(_rotulo("O que você quer fazer?", Estilo.SUAVE, 0.32))
+	var tiles := HBoxContainer.new()
+	tiles.add_theme_constant_override("separation", int(_u * 0.15))
+	for par in [["inicio_criar", "Criar do zero", 0], ["inicio_importar", "Importar personagem", 1]]:
+		var b := Boto.new(str(par[0]), str(par[1]))
+		b.custom_minimum_size = Vector2(0, _u * (1.9 if _paisagem else 2.6))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.tam_fonte = int(_u * 0.3)
+		b.pressionado.connect(_abrir_novo_do_zero if int(par[2]) == 0 else _abrir_importar_novo)
+		tiles.add_child(b)
+	col.add_child(tiles)
+	if not _doc_temp:
+		col.add_child(_linha("Continuar editando: " + doc.nome, "check", _entrar_editor))
+	col.add_child(_rotulo("Seus personagens", Estilo.SUAVE, 0.3))
+	var rol := Rolagem.new()
+	rol.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(rol)
+	var lista := VBoxContainer.new()
+	lista.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lista.add_theme_constant_override("separation", int(_u * 0.12))
+	rol.add_child(lista)
+	var salvos: Array = Documento.listar_projetos()
+	if salvos.is_empty():
+		lista.add_child(_rotulo("Nenhum personagem salvo ainda.", Estilo.SUAVE, 0.3))
+	for p in salvos:
+		lista.add_child(_linha(str(p["nome"]), "pessoa", _abrir_projeto_id.bind(str(p["id"])), (not _doc_temp) and str(p["id"]) == doc.id))
+	_modo_inicio = true
+
+
+func _entrar_editor() -> void:
+	_modo_inicio = false
+	if _inicio != null and is_instance_valid(_inicio):
+		_inicio.queue_free()
+	_inicio = null
+
+
+func _abrir_novo_do_zero() -> void:
+	var f: Variant = _nova_folha("Criar do zero")
+	var c: VBoxContainer = f.conteudo
+	var nome := _campo("Nome do personagem", "")
+	c.add_child(nome)
+	c.add_child(_rotulo("Tamanho da arte (pixels)", Estilo.SUAVE, 0.3))
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", int(_u * 0.1))
+	var ew := _campo("Largura", "64")
+	var eh := _campo("Altura", "64")
+	for e in [ew, eh]:
+		(e as LineEdit).virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+		(e as LineEdit).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		(e as LineEdit).alignment = HORIZONTAL_ALIGNMENT_CENTER
+	h.add_child(ew)
+	h.add_child(_rotulo("×", Estilo.SUAVE, 0.4))
+	h.add_child(eh)
+	c.add_child(h)
+	var chips := HFlowContainer.new()
+	chips.add_theme_constant_override("h_separation", int(_u * 0.08))
+	chips.add_theme_constant_override("v_separation", int(_u * 0.08))
+	for n in [32, 64, 96, 128, 192]:
+		chips.add_child(_b("", _preset_tamanho.bind(ew, eh, int(n)), str(n)))
+	c.add_child(chips)
+	c.add_child(_rotulo("Largura e altura são escolha sua, de 8 a 512 px.", Estilo.SUAVE, 0.26))
+	c.add_child(_linha("Criar personagem", "check", _criar_do_zero.bind(nome, ew, eh)))
+
+
+func _preset_tamanho(ew: LineEdit, eh: LineEdit, n: int) -> void:
+	ew.text = str(n)
+	eh.text = str(n)
+
+
+func _criar_do_zero(nome_ed: LineEdit, ew: LineEdit, eh: LineEdit) -> void:
+	var nome: String = nome_ed.text.strip_edges()
+	if nome == "":
+		nome = "Novo personagem"
+	var w: int = clampi(ew.text.to_int(), 8, 512)
+	var h: int = clampi(eh.text.to_int(), 8, 512)
+	_modo_inicio = false
+	_fechar_folha()
+	_salvar()
+	doc.novo(nome, w, h)
+	_doc_temp = false
+	_gaveta = ""
+	_ferr = "lapis"
+	_entrar_editor()
+	_recarregar_tudo()
+	_agendar_save()
 
 
 # ---------- aviso rápido ----------

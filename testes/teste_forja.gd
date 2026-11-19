@@ -28,8 +28,8 @@ func _initialize() -> void:
 	ext.fill(Color.RED)
 	d.selecionar(1)
 	_ok(d.inserir_quadros([ext]) == 1, "importar 1 imagem")
-	_ok(d.imagem().get_width() == 32 and d.imagem().get_height() == 32, "imagem ajustada ao tamanho da arte")
-	_ok(d.imagem().get_pixel(16, 31) == Color.RED and d.imagem().get_pixel(0, 0).a == 0.0, "pés na base, centro na horizontal")
+	_ok(d.imagem().get_width() == 10 and d.imagem().get_height() == 20, "sprite importado mantem o proprio tamanho")
+	_ok(d.imagem().get_pixel(0, 0) == Color.RED and d.imagem().get_pixel(9, 19) == Color.RED, "pixels do sprite importado intactos")
 
 	# desenhar + desfazer + refazer
 	d.direcao = "esquerda"
@@ -42,6 +42,13 @@ func _initialize() -> void:
 	_ok(d.imagem().get_pixel(3, 4).a == 0.0, "desfazer apagou o pixel")
 	_ok(d.refazer(), "refazer devolve true")
 	_ok(d.imagem().get_pixel(3, 4) == Color.RED, "refazer devolveu o pixel")
+
+	# cada sprite tem o proprio tamanho: redimensionar so este quadro, com desfazer/refazer
+	d.redimensionar_quadro(40, 24)
+	_ok(d.imagem().get_width() == 40 and d.imagem().get_height() == 24, "sprite redimensionado")
+	_ok(d.desfazer() and d.imagem().get_width() == 32 and d.imagem().get_height() == 32, "desfazer devolve o tamanho antigo")
+	_ok(d.refazer() and d.imagem().get_width() == 40 and d.imagem().get_height() == 24, "refazer devolve o tamanho novo")
+	_ok(d.desfazer() and d.imagem().get_width() == 32, "voltou a 32x32 para os proximos testes")
 
 	# quadros
 	d.adicionar_quadro(true)
@@ -90,6 +97,9 @@ func _initialize() -> void:
 	_ok(zr.open("res://teste_saida.ember") == OK, "abrir zip")
 	var arqs: PackedStringArray = zr.get_files()
 	_ok(arqs.has("personagem.json") and arqs.has("ember.json"), "json no zip")
+	var andando_png := Image.new()
+	_ok(andando_png.load_png_from_buffer(zr.read_file("sprites/andando_1.png")) == OK, "png do andando no zip")
+	_ok(andando_png.get_width() == 10 and andando_png.get_height() == 20, ".ember guarda o tamanho proprio de cada sprite")
 	var pj: Variant = JSON.parse_string(zr.read_file("personagem.json").get_string_from_utf8())
 	_ok(typeof(pj) == TYPE_DICTIONARY, "personagem.json valido")
 	var norm: Dictionary = Formato.normalizar(pj)
@@ -117,6 +127,7 @@ func _initialize() -> void:
 	_ok(d2.sequencias.size() == d.sequencias.size(), "mesmas sequencias")
 	_ok(d2.sequencias[0]["quadros"].size() == 3, "mesmos quadros")
 	_ok((d2.sequencias[0]["quadros"][0] as Image).get_pixel(3, 4) == Color.RED, "pixel salvo")
+	_ok((d2.sequencias[1]["quadros"][0] as Image).get_width() == 10 and (d2.sequencias[1]["quadros"][0] as Image).get_height() == 20, "tamanho de cada sprite salvo e reaberto")
 
 	print("falhas: ", falhas)
 	quit(falhas)

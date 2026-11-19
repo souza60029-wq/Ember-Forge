@@ -18,6 +18,9 @@ var grade: bool = false
 var cebola: bool = false
 var cheio: bool = false
 var tam_pincel: int = 1
+var forma_fixa: bool = true   # retangulo: tamanho escolhido antes (forma_w x forma_h)
+var forma_w: int = 16
+var forma_h: int = 16
 var somente_ver: bool = false
 var legenda: String = ""
 var zoom: float = 8.0
@@ -271,6 +274,9 @@ func _comecar(pos: Vector2) -> void:
 	if ferramenta == "linha" or ferramenta == "retangulo":
 		_base = Image.new()
 		_base.copy_from(img)
+		if ferramenta == "retangulo" and forma_fixa:
+			_desenhar_forma_fixa(img, c)
+			_mostrar(img)
 	if ferramenta == "balde":
 		_preencher(img, c)
 		_terminar(pos)
@@ -304,7 +310,10 @@ func _arrastar(pos: Vector2) -> void:
 			_ponto_linha(img, _ini, c)
 		"retangulo":
 			img.copy_from(_base)
-			_retangulo(img, _ini, c)
+			if forma_fixa:
+				_desenhar_forma_fixa(img, c)
+			else:
+				_retangulo(img, _ini, c)
 	_mostrar(img)
 
 
@@ -404,6 +413,14 @@ func _retangulo(img: Image, a: Vector2i, b: Vector2i) -> void:
 	_ponto_linha(img, Vector2i(x1, y0), Vector2i(x1, y1))
 	_ponto_linha(img, Vector2i(x1, y1), Vector2i(x0, y1))
 	_ponto_linha(img, Vector2i(x0, y1), Vector2i(x0, y0))
+
+
+# Retangulo de tamanho escolhido: o centro segue o dedo, solta para fixar.
+func _desenhar_forma_fixa(img: Image, c: Vector2i) -> void:
+	var w: int = maxi(forma_w, 1)
+	var h: int = maxi(forma_h, 1)
+	var a := Vector2i(c.x - w / 2, c.y - h / 2)
+	_retangulo(img, a, Vector2i(a.x + w - 1, a.y + h - 1))
 
 
 func _igual(a: Color, b: Color) -> bool:

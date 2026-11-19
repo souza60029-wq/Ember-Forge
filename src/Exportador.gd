@@ -41,13 +41,42 @@ static func png_quadro(doc: Variant) -> Dictionary:
 	return _gravar(nome, (doc.imagem() as Image).save_png_to_buffer())
 
 
+# Cada sprite tem o seu tamanho. Na folha e no GIF (que precisam de células iguais) cada um
+# fica centralizado e com os pés na base da maior caixa. Os PNGs individuais e o .ember mantêm o tamanho de cada sprite.
+static func _caixa(imagens: Array) -> Vector2i:
+	var w: int = 1
+	var h: int = 1
+	for im in imagens:
+		w = maxi(w, (im as Image).get_width())
+		h = maxi(h, (im as Image).get_height())
+	return Vector2i(w, h)
+
+
+static func _na_caixa(im: Image, w: int, h: int) -> Image:
+	var iw: int = im.get_width()
+	var ih: int = im.get_height()
+	if iw == w and ih == h:
+		return im
+	var saida: Image = Image.create(w, h, false, Image.FORMAT_RGBA8)
+	saida.fill(Color(0, 0, 0, 0))
+	saida.blit_rect(im, Rect2i(0, 0, iw, ih), Vector2i((w - iw) / 2, h - ih))
+	return saida
+
+
+static func _uniformizar(imagens: Array) -> Array:
+	var c: Vector2i = _caixa(imagens)
+	var r: Array = []
+	for im in imagens:
+		r.append(_na_caixa(im as Image, c.x, c.y))
+	return r
+
+
 static func folha(imagens: Array) -> Image:
-	var w: int = (imagens[0] as Image).get_width()
-	var h: int = (imagens[0] as Image).get_height()
-	var f := Image.create(w * imagens.size(), h, false, Image.FORMAT_RGBA8)
+	var c: Vector2i = _caixa(imagens)
+	var f := Image.create(c.x * imagens.size(), c.y, false, Image.FORMAT_RGBA8)
 	f.fill(Color(0, 0, 0, 0))
 	for i in range(imagens.size()):
-		f.blit_rect(imagens[i], Rect2i(0, 0, w, h), Vector2i(i * w, 0))
+		f.blit_rect(_na_caixa(imagens[i] as Image, c.x, c.y), Rect2i(0, 0, c.x, c.y), Vector2i(i * c.x, 0))
 	return f
 
 
@@ -61,7 +90,7 @@ static func gif(doc: Variant) -> Dictionary:
 	if q.size() < 2:
 		return {"ok": false, "msg": "O GIF precisa de 2 quadros ou mais."}
 	var nome: String = "%s_%s.gif" % [_limpo(doc.nome), str(doc.sequencia()["id"])]
-	return _gravar(nome, Gif.codificar(q, int(doc.sequencia()["fps"])))
+	return _gravar(nome, Gif.codificar(_uniformizar(q), int(doc.sequencia()["fps"])))
 
 
 # Monta o personagem.json e os sprites. Devolve {ok, erro, personagem, arquivos: {caminho: bytes}}.

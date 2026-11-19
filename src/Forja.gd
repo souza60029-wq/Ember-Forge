@@ -420,6 +420,7 @@ func _gaveta_quadros() -> void:
 	l1.add_child(_btn_play)
 	_btn_fps = _item("", "%d fps" % int(doc.sequencia()["fps"]), _ciclar_fps)
 	l1.add_child(_btn_fps)
+	l1.add_child(_item("tamanho", "Tamanho", _abrir_tamanho))
 	_inferior.add_child(l1)
 	var l2 := _linha_gaveta()
 	l2.add_child(_item("mais", "Novo", _add_quadro.bind(false)))

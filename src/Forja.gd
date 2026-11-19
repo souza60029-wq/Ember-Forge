@@ -733,4 +733,4 @@ func _salvar_sessao() -> void:
 	var d := {"id": doc.id, "ferr": _ferr, "cor": _cor_i, "espelho": tela.espelho, "grade": tela.grade,
 		"cebola": tela.cebola, "pincel": tela.tam_pincel, "cheio": tela.cheio, "forma_fixa": tela.forma_fixa, "fw": tela.forma_w, "fh": tela.forma_h, "zoom": tela.zoom,
 		"ox": tela.origem.x, "oy": tela.origem.y, "auto": tela._auto_ajuste, "vp": [vp.x, vp.y]}
-	DirAccess.make_dir_recursive_absolute("user://forja/
+	DirAccess.make_dir_recursive_absolute("user://forja/")

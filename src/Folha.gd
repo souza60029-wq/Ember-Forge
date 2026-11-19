@@ -4,6 +4,7 @@ extends Control
 
 const Estilo = preload("res://src/Estilo.gd")
 const Boto = preload("res://src/Boto.gd")
+const Rolagem = preload("res://src/Rolagem.gd")
 
 signal fechada
 
@@ -43,9 +44,8 @@ func configurar(titulo: String, u: float, tela: Vector2) -> void:
 	x.custom_minimum_size = Vector2(u * 0.9, u * 0.9)
 	x.pressionado.connect(fechar)
 	topo.add_child(x)
-	var rolagem := ScrollContainer.new()
+	var rolagem := Rolagem.new()
 	rolagem.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	rolagem.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	col.add_child(rolagem)
 	conteudo = VBoxContainer.new()
 	conteudo.size_flags_horizontal = Control.SIZE_EXPAND_FILL

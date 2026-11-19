@@ -734,8 +734,7 @@ func _salvar_sessao() -> void:
 		"cebola": tela.cebola, "pincel": tela.tam_pincel, "cheio": tela.cheio, "forma_fixa": tela.forma_fixa, "fw": tela.forma_w, "fh": tela.forma_h, "zoom": tela.zoom,
 		"ox": tela.origem.x, "oy": tela.origem.y, "auto": tela._auto_ajuste, "vp": [vp.x, vp.y]}
 	DirAccess.make_dir_recursive_absolute("user://forja/")
-
-var f := FileAccess.open(SESSAO, FileAccess.WRITE)
+	var f := FileAccess.open(SESSAO, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(d))
 		f.close()

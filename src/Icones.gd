@@ -14,6 +14,7 @@ const ALIAS := {
 	"inicio_criar": "lapis", "inicio_importar": "importar", "inicio": "projeto",
 	"golpe_lp": "hitbox", "golpe_lk": "hitbox", "golpe_hp": "hitbox", "golpe_hk": "hitbox",
 	"golpe_bo": "hitbox", "golpe_custom": "hitbox", "golpe_novo": "mais",
+tamanho": "ajustar
 }
 
 

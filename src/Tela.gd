@@ -30,6 +30,7 @@ var _tex: ImageTexture = null
 var _tex_prev: ImageTexture = null
 var _fundo: ImageTexture = null
 var _fundo_tam: Vector2i = Vector2i.ZERO
+var _img_tam: Vector2i = Vector2i.ZERO   # tamanho do quadro mostrado (cada sprite tem o seu)
 var _dedos := {}
 var _gesto: bool = false
 var _g_dist: float = 0.0
@@ -65,11 +66,20 @@ func _ao_redimensionar() -> void:
 func ajustar() -> void:
 	if doc == null or size.x < 8.0 or size.y < 8.0:
 		return
-	var w: float = float(doc.largura)
-	var h: float = float(doc.altura)
+	# O "palco" é o maior sprite da sequência; cada quadro fica centralizado e com os pés na base dele.
+	var sw: int = 1
+	var sh: int = 1
+	for im in doc.quadros():
+		sw = maxi(sw, (im as Image).get_width())
+		sh = maxi(sh, (im as Image).get_height())
+	var img: Image = doc.imagem()
+	var w: float = float(sw)
+	var h: float = float(sh)
 	var z: float = minf((size.x - 12.0) / w, (size.y - 12.0) / h)
 	zoom = maxf(1.0, floorf(z)) if z >= 1.0 else maxf(0.25, z)
-	origem = (size - Vector2(w, h) * zoom) * 0.5
+	var palco: Vector2 = (size - Vector2(w, h) * zoom) * 0.5
+	origem = palco + Vector2((w - float(img.get_width())) * 0.5, h - float(img.get_height())) * zoom
+	_img_tam = Vector2i(img.get_width(), img.get_height())
 	_auto_ajuste = true
 	queue_redraw()
 
@@ -78,6 +88,12 @@ func atualizar() -> void:
 	if doc == null:
 		return
 	var img: Image = doc.imagem()
+	var nt := Vector2i(img.get_width(), img.get_height())
+	if _img_tam != Vector2i.ZERO and nt != _img_tam:
+		# mudou de tamanho: os pés (base, centro) ficam no mesmo lugar da tela
+		var pe: Vector2 = origem + Vector2(float(_img_tam.x) * 0.5, float(_img_tam.y)) * zoom
+		origem = pe - Vector2(float(nt.x) * 0.5, float(nt.y)) * zoom
+	_img_tam = nt
 	if _tex == null or _tex.get_size() != Vector2(img.get_width(), img.get_height()):
 		_tex = ImageTexture.create_from_image(img)
 	else:
@@ -86,6 +102,8 @@ func atualizar() -> void:
 	var q: Array = doc.quadros()
 	if cebola and doc.quadro > 0:
 		_tex_prev = ImageTexture.create_from_image(q[doc.quadro - 1])
+	if _auto_ajuste:
+		ajustar()
 	queue_redraw()
 
 
@@ -98,8 +116,7 @@ func _celula(p: Vector2) -> Vector2i:
 	return Vector2i(int(floorf(v.x)), int(floorf(v.y)))
 
 
-func _checker() -> ImageTexture:
-	var t := Vector2i(doc.largura, doc.altura)
+func _checker(t: Vector2i) -> ImageTexture:
 	if _fundo == null or _fundo_tam != t:
 		var im := Image.create(t.x, t.y, false, Image.FORMAT_RGBA8)
 		for y in range(t.y):
@@ -118,21 +135,25 @@ func _draw() -> void:
 		return
 	if _tex == null:
 		atualizar()
-	var w: float = float(doc.largura)
-	var h: float = float(doc.altura)
+	var atual: Image = doc.imagem()
+	var iw: int = atual.get_width()
+	var ih: int = atual.get_height()
+	var w: float = float(iw)
+	var h: float = float(ih)
 	var r := Rect2(origem, Vector2(w, h) * zoom)
 	draw_rect(Rect2(Vector2.ZERO, size), Estilo.FUNDO, true)
-	draw_texture_rect(_checker(), r, false)
+	draw_texture_rect(_checker(Vector2i(iw, ih)), r, false)
 	if cebola and not somente_ver and _tex_prev != null:
-		draw_texture_rect(_tex_prev, r, false, Color(1, 1, 1, 0.3))
+		var ps: Vector2 = _tex_prev.get_size()
+		draw_texture_rect(_tex_prev, Rect2(origem + Vector2((w - ps.x) * 0.5, h - ps.y) * zoom, ps * zoom), false, Color(1, 1, 1, 0.3))
 	draw_texture_rect(_tex, r, false)
 	if somente_ver:
 		return
 	if grade and zoom >= 6.0:
 		var gc := Color(1, 1, 1, 0.12)
-		for x in range(doc.largura + 1):
+		for x in range(iw + 1):
 			draw_line(origem + Vector2(float(x) * zoom, 0.0), origem + Vector2(float(x) * zoom, h * zoom), gc, 1.0)
-		for y in range(doc.altura + 1):
+		for y in range(ih + 1):
 			draw_line(origem + Vector2(0.0, float(y) * zoom), origem + Vector2(w * zoom, float(y) * zoom), gc, 1.0)
 	draw_rect(r, Estilo.BORDA, false, 2.0)
 	# guia dos pés: centro e base da imagem (a engine alinha o sprite por aí)
@@ -157,24 +178,29 @@ func _fator() -> float:
 	return CORPO / maxf(float(doc.altura_px), 1.0)
 
 
+# A hitbox é medida a partir do centro/base do sprite, então depende do tamanho DESTE sprite.
 func _hitbox_para_pixels() -> Rect2:
 	var hb: Dictionary = doc.sequencia()["golpe"]["hitbox"]
 	var k: float = _fator()
-	var x0: float = float(doc.largura) * 0.5 + float(hb["x"]) / k
+	var iw: float = float(doc.imagem().get_width())
+	var ih: float = float(doc.imagem().get_height())
+	var x0: float = iw * 0.5 + float(hb["x"]) / k
 	if doc.direcao == "esquerda":
 		# a hitbox é guardada "para a frente"; se o sprite olha para a esquerda, a frente é a esquerda
-		x0 = float(doc.largura) * 0.5 - (float(hb["x"]) + float(hb["w"])) / k
-	return Rect2(x0, float(doc.altura) + float(hb["y"]) / k, float(hb["w"]) / k, float(hb["h"]) / k)
+		x0 = iw * 0.5 - (float(hb["x"]) + float(hb["w"])) / k
+	return Rect2(x0, ih + float(hb["y"]) / k, float(hb["w"]) / k, float(hb["h"]) / k)
 
 
 func _pixels_para_hitbox(rp: Rect2) -> void:
 	var k: float = _fator()
 	var hb: Dictionary = doc.sequencia()["golpe"]["hitbox"]
+	var iw: float = float(doc.imagem().get_width())
+	var ih: float = float(doc.imagem().get_height())
 	if doc.direcao == "esquerda":
-		hb["x"] = clampi(int(roundf((float(doc.largura) * 0.5 - (rp.position.x + rp.size.x)) * k)), -200, 200)
+		hb["x"] = clampi(int(roundf((iw * 0.5 - (rp.position.x + rp.size.x)) * k)), -200, 200)
 	else:
-		hb["x"] = clampi(int(roundf((rp.position.x - float(doc.largura) * 0.5) * k)), -200, 200)
-	hb["y"] = clampi(int(roundf((rp.position.y - float(doc.altura)) * k)), -200, 0)
+		hb["x"] = clampi(int(roundf((rp.position.x - iw * 0.5) * k)), -200, 200)
+	hb["y"] = clampi(int(roundf((rp.position.y - ih) * k)), -200, 0)
 	hb["w"] = clampi(int(roundf(rp.size.x * k)), 1, 300)
 	hb["h"] = clampi(int(roundf(rp.size.y * k)), 1, 300)
 
@@ -336,7 +362,7 @@ func _cancelar_traco() -> void:
 	if _tracando:
 		_tracando = false
 		var img: Image = doc.imagem()
-		img.set_data(doc.largura, doc.altura, false, Image.FORMAT_RGBA8, _antes)
+		img.set_data(img.get_width(), img.get_height(), false, Image.FORMAT_RGBA8, _antes)
 		_base = null
 		_mostrar(img)
 	_hb_modo = ""

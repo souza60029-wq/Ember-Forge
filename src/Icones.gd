@@ -6,7 +6,36 @@ static func _v(c: Vector2, s: float, x: float, y: float) -> Vector2:
 	return c + Vector2(x, y) * s
 
 
+# Para trocar um ícone por uma imagem sua: coloque res://icones/<nome>.png (quadrada, fundo transparente).
+# Se o arquivo existir ele é usado; se não, vale o desenho em código abaixo.
+static var _cache := {}
+
+const ALIAS := {
+	"inicio_criar": "lapis", "inicio_importar": "importar", "inicio": "projeto",
+	"golpe_lp": "hitbox", "golpe_lk": "hitbox", "golpe_hp": "hitbox", "golpe_hk": "hitbox",
+	"golpe_bo": "hitbox", "golpe_custom": "hitbox", "golpe_novo": "mais",
+}
+
+
+static func _png(nome: String) -> Texture2D:
+	if _cache.has(nome):
+		return _cache[nome]
+	var tex: Texture2D = null
+	var cam: String = "res://icones/" + nome + ".png"
+	if ResourceLoader.exists(cam):
+		tex = load(cam) as Texture2D
+	_cache[nome] = tex
+	return tex
+
+
 static func desenhar(ci: CanvasItem, nome: String, r: Rect2, cor: Color, extra: int = 1) -> void:
+	var tex: Texture2D = _png(nome)
+	if tex != null:
+		var lado: float = minf(r.size.x, r.size.y)
+		ci.draw_texture_rect(tex, Rect2(r.get_center() - Vector2(lado, lado) * 0.5, Vector2(lado, lado)), false)
+		return
+	if ALIAS.has(nome):
+		nome = str(ALIAS[nome])
 	var c: Vector2 = r.get_center()
 	var s: float = minf(r.size.x, r.size.y) / 48.0
 	var w: float = maxf(2.0, 2.6 * s)
@@ -142,6 +171,9 @@ static func desenhar(ci: CanvasItem, nome: String, r: Rect2, cor: Color, extra: 
 		"quadros":
 			ci.draw_rect(Rect2(_v(c, s, -15, -9), Vector2(18, 18) * s), cor, false, w)
 			ci.draw_rect(Rect2(_v(c, s, 1, -9), Vector2(14, 18) * s), cor, true)
+		_:
+			if nome != "pessoa":
+				desenhar(ci, "pessoa", r, cor, extra)
 
 
 static func Estilo_fundo() -> Color:

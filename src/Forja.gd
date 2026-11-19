@@ -397,7 +397,7 @@ func _gaveta_forma() -> void:
 	l1.add_child(_item("", "Fixo", _alternar_fixo, tela.forma_fixa))
 	_inferior.add_child(l1)
 	if tela.forma_fixa:
-		var mx: int = maxi(doc.largura, doc.altura)
+				var mx: int = maxi(doc.imagem().get_width(), doc.imagem().get_height())
 		_stepper(_inferior, "Largura", tela.forma_w, 1, 1, mx, _set_forma.bind("w"), _ub * 0.85)
 		_stepper(_inferior, "Altura", tela.forma_h, 1, 1, mx, _set_forma.bind("h"), _ub * 0.85)
 

@@ -93,11 +93,18 @@ func _draw() -> void:
 			draw_rect(rs, Color(1, 1, 1, 0.85), false, 2.0)
 		else:
 			draw_rect(r.grow(-size.x * 0.18), cor_amostra, true)
-	if icone != "":
-		var area := r.grow(-minf(size.x, size.y) * 0.16)
-		if rotulo != "":
-			area = Rect2(area.position, Vector2(area.size.x, area.size.y * 0.62))
+	var area := r.grow(-minf(size.x, size.y) * 0.16)
+	if rotulo != "":
+		area = Rect2(area.position, Vector2(area.size.x, area.size.y * 0.62))
+	if textura != null:
+		var tsz: Vector2 = textura.get_size()
+		var esc: float = minf(area.size.x / maxf(tsz.x, 1.0), area.size.y / maxf(tsz.y, 1.0))
+		draw_rect(Rect2(area.get_center() - tsz * esc * 0.5, tsz * esc), Color(0, 0, 0, 0.35), true)
+		draw_texture_rect(textura, Rect2(area.get_center() - tsz * esc * 0.5, tsz * esc), false)
+	elif icone != "":
 		Icones.desenhar(self, icone, area, cor, extra)
+	if sub != "":
+		draw_string(fonte, Vector2(0.0, float(fs) + 4.0), sub, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 8.0, int(fs * 0.9), Estilo.DESTAQUE)
 	if rotulo != "":
 		var y: float = size.y * 0.88 if (icone != "" or cor_amostra.a > 0.0) else size.y * 0.5 + float(fs) * 0.35
 		draw_string(fonte, Vector2(0.0, y), rotulo, HORIZONTAL_ALIGNMENT_CENTER, size.x, fs, cor)

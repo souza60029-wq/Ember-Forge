@@ -103,6 +103,7 @@ func imagem() -> Image:
 	return quadros()[quadro]
 
 
+# largura x altura = tamanho PADRÃO de um sprite novo. Cada quadro pode ter o seu próprio tamanho.
 func nova_imagem() -> Image:
 	var img := Image.create(largura, altura, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
@@ -139,25 +140,34 @@ func e_golpe() -> bool:
 func adicionar_quadro(duplicar: bool) -> void:
 	var q: Array = quadros()
 	var novo_img: Image = nova_imagem()
-	if duplicar and not q.is_empty():
-		novo_img.copy_from(q[quadro])
+	if not q.is_empty():
+		var atual: Image = q[quadro]
+		if duplicar:
+			novo_img.copy_from(atual)
+		else:
+			# quadro em branco com o mesmo tamanho do quadro atual
+			novo_img = Image.create(atual.get_width(), atual.get_height(), false, Image.FORMAT_RGBA8)
+			novo_img.fill(Color(0, 0, 0, 0))
 	q.insert(quadro + 1, novo_img)
 	quadro += 1
 	_marcar_estrutura()
 
 
-# Coloca imagens importadas como quadros novos (cada uma ajustada ao tamanho da arte).
-# Se a sequência só tem um quadro vazio, a primeira imagem ocupa o lugar dele.
+# Coloca imagens importadas como quadros novos. Cada sprite mantém o SEU tamanho (a engine usa o tamanho
+# do sprite para posicionar e para desenhar a hitbox). Se a sequência só tem um quadro vazio,
+# a primeira imagem ocupa o lugar dele.
 func inserir_quadros(imagens: Array) -> int:
 	var q: Array = quadros()
 	var n: int = 0
 	for im in imagens:
-		var ajustada: Image = ajustar_imagem(im)
+		var img: Image = Image.new()
+		img.copy_from(im)
+		img.convert(Image.FORMAT_RGBA8)
 		if n == 0 and q.size() == 1 and (q[0] as Image).is_invisible():
-			(q[0] as Image).copy_from(ajustada)
+			q[0] = img
 			quadro = 0
 		else:
-			q.insert(quadro + 1, ajustada)
+			q.insert(quadro + 1, img)
 			quadro += 1
 		n += 1
 	if n > 0:
@@ -165,31 +175,31 @@ func inserir_quadros(imagens: Array) -> int:
 	return n
 
 
-# Cabe na arte sem borrar: escala inteira para cima, vizinho mais próximo para baixo;
-# centro na horizontal e pés na base (como a engine alinha o sprite).
-func ajustar_imagem(origem: Image) -> Image:
-	var img: Image = Image.new()
-	img.copy_from(origem)
-	img.convert(Image.FORMAT_RGBA8)
-	var w: int = img.get_width()
-	var h: int = img.get_height()
-	var saida: Image = nova_imagem()
-	if w == largura and h == altura:
-		return img
-	var fator: float = minf(float(largura) / float(w), float(altura) / float(h))
-	var nw: int = w
-	var nh: int = h
-	if fator >= 1.0:
-		var inteiro: int = maxi(1, int(floorf(fator)))
-		nw = w * inteiro
-		nh = h * inteiro
-	else:
-		nw = maxi(1, int(roundf(float(w) * fator)))
-		nh = maxi(1, int(roundf(float(h) * fator)))
-	if nw != w or nh != h:
-		img.resize(nw, nh, Image.INTERPOLATE_NEAREST)
-	saida.blit_rect(img, Rect2i(0, 0, nw, nh), Vector2i((largura - nw) / 2, altura - nh))
-	return saida
+# Muda o tamanho do sprite atual (só dele). O desenho fica centralizado e com os pés na base.
+func redimensionar_quadro(nw: int, nh: int) -> void:
+	nw = clampi(nw, 4, 2048)
+	nh = clampi(nh, 4, 2048)
+	var img: Image = imagem()
+	var ow: int = img.get_width()
+	var oh: int = img.get_height()
+	if nw == ow and nh == oh:
+		return
+	empurrar_undo(img.get_data(), ow, oh)
+	var novo_img: Image = Image.create(nw, nh, false, Image.FORMAT_RGBA8)
+	novo_img.fill(Color(0, 0, 0, 0))
+	var dx: int = (nw - ow) / 2
+	var dy: int = nh - oh
+	var sx: int = maxi(0, -dx)
+	var sy: int = maxi(0, -dy)
+	var px: int = maxi(0, dx)
+	var py: int = maxi(0, dy)
+	var cw: int = mini(ow - sx, nw - px)
+	var ch: int = mini(oh - sy, nh - py)
+	if cw > 0 and ch > 0:
+		novo_img.blit_rect(img, Rect2i(sx, sy, cw, ch), Vector2i(px, py))
+	img.copy_from(novo_img)
+	_sujos["%d_%d" % [seq, quadro]] = true
+	marcar_sujo()
 
 
 func remover_quadro() -> void:
@@ -216,9 +226,12 @@ func mover_quadro(d: int) -> void:
 
 # ---------- desfazer / refazer ----------
 
-func empurrar_undo(dados_antes: PackedByteArray) -> void:
+# w/h: tamanho do quadro ANTES da mudança (se omitidos, vale o tamanho atual do quadro).
+func empurrar_undo(dados_antes: PackedByteArray, w: int = 0, h: int = 0) -> void:
+	var atual: Image = quadros()[quadro]
 	_sujos["%d_%d" % [seq, quadro]] = true
-	_undo.append({"s": seq, "q": quadro, "d": dados_antes})
+	_undo.append({"s": seq, "q": quadro, "d": dados_antes,
+		"w": w if w > 0 else atual.get_width(), "h": h if h > 0 else atual.get_height()})
 	if _undo.size() > MAX_UNDO:
 		_undo.pop_front()
 	_redo.clear()
@@ -245,8 +258,8 @@ func _trocar(de: Array, para: Array) -> bool:
 	if q < 0 or q >= lista.size():
 		return false
 	var img: Image = lista[q]
-	para.append({"s": s, "q": q, "d": img.get_data()})
-	img.set_data(largura, altura, false, Image.FORMAT_RGBA8, e["d"])
+	para.append({"s": s, "q": q, "d": img.get_data(), "w": img.get_width(), "h": img.get_height()})
+	img.set_data(int(e.get("w", img.get_width())), int(e.get("h", img.get_height())), false, Image.FORMAT_RGBA8, e["d"])
 	seq = s
 	quadro = q
 	_sujos["%d_%d" % [s, q]] = true
@@ -335,8 +348,6 @@ func abrir(p_id: String) -> bool:
 			var img: Image = Image.load_from_file(pasta + "s%d_q%d.png" % [i, j])
 			if img == null or img.is_empty():
 				img = nova_imagem()
-			if img.get_width() != largura or img.get_height() != altura:
-				img.resize(largura, altura, Image.INTERPOLATE_NEAREST)
 			img.convert(Image.FORMAT_RGBA8)
 			q.append(img)
 		sequencias.append(s)

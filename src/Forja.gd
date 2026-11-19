@@ -15,6 +15,8 @@ const Formato = preload("res://src/Formato.gd")
 const Seletor = preload("res://src/Seletor.gd")
 
 const FPS_OPCOES := [4, 6, 8, 12, 16, 24]
+const FERR_PINCEL := ["lapis", "borracha"]
+const FERR_FORMA := ["linha", "retangulo"]
 const SESSAO := "user://forja/sessao.json"
 
 var doc: Variant = null
@@ -35,8 +37,13 @@ var _cor_i: int = 3
 var _limpo: bool = false
 var _tocando: bool = false
 var _ultimo_tam: Vector2 = Vector2.ZERO
-var _botoes_ferr := {}
-var _botoes_tog := {}
+var _inferior: VBoxContainer = null
+var _gaveta: String = ""
+var _ub: float = 64.0
+var _paisagem: bool = false
+var _ult_pincel: String = "lapis"
+var _ult_forma: String = "retangulo"
+var _pend_imgs: Array = []
 var _btn_play: Boto = null
 var _btn_fps: Boto = null
 var _exp_status: Label = null
@@ -111,6 +118,11 @@ func _recarregar_tudo() -> void:
 
 
 # ---------- montagem da interface (responsiva) ----------
+#
+# Em cima: Personagem (ação/golpe atual), Importar, Salvar.
+# No meio: a arte e a faixa de quadros (com desfazer/refazer).
+# Embaixo: a "gaveta". Normalmente mostra os botões principais (dock); ao tocar num deles,
+# a gaveta daquela ferramenta ocupa o lugar e as outras somem até tocar em voltar.
 
 func _b(icone: String, cb: Callable, rotulo: String = "") -> Boto:
 	var b := Boto.new(icone, rotulo)
@@ -121,27 +133,53 @@ func _b(icone: String, cb: Callable, rotulo: String = "") -> Boto:
 	return b
 
 
+# Botão que cabe na linha: sem largura mínima, divide o espaço com os vizinhos.
+func _bt(icone: String, rotulo: String, cb: Callable, alt: float, ratio: float = 1.0) -> Boto:
+	var b := Boto.new(icone, rotulo)
+	b.custom_minimum_size = Vector2(0, alt)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.size_flags_stretch_ratio = ratio
+	b.tam_fonte = int(_u * 0.22)
+	if cb.is_valid():
+		b.pressionado.connect(cb)
+	return b
+
+
+func _item(icone: String, rotulo: String, cb: Callable, ativo: bool = false) -> Boto:
+	var b := _bt(icone, rotulo, cb, _ub)
+	b.ativo = ativo
+	return b
+
+
 func _legenda() -> String:
 	var s: Dictionary = doc.sequencia()
 	return "%s   %d/%d" % [str(s["nome"]), doc.quadro + 1, doc.quadros().size()]
+
+
+func _soltar_persistentes() -> void:
+	for n in [tela, paleta, quadros_ui]:
+		if n.get_parent() != null:
+			n.get_parent().remove_child(n)
 
 
 func _montar() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	_ultimo_tam = vp
 	_u = Estilo.unidade(vp)
-	for n in [tela, paleta, quadros_ui]:
-		if n.get_parent() != null:
-			n.get_parent().remove_child(n)
+	_paisagem = vp.x > vp.y * 1.15
+	_ub = _u * (0.85 if _paisagem else 1.0)
+	_soltar_persistentes()
 	if _raiz != null:
 		remove_child(_raiz)
 		_raiz.queue_free()
+		_raiz = null
 	if _olho != null:
 		remove_child(_olho)
 		_olho.queue_free()
 		_olho = null
-	_botoes_ferr.clear()
-	_botoes_tog.clear()
+	_inferior = null
+	_btn_play = null
+	_btn_fps = null
 	tela.somente_ver = _limpo or _tocando
 	tela.legenda = "" if _limpo else _legenda()
 	tela.ferramenta = _ferr
@@ -176,137 +214,263 @@ func _montar() -> void:
 		return
 
 	var sep: int = int(_u * 0.08)
-	var paisagem: bool = vp.x > vp.y * 1.15
-	paleta.custom_minimum_size = Vector2(0, _u * 1.1)
-	paleta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	quadros_ui.custom_minimum_size = Vector2(0, _u * 1.15)
-	quadros_ui.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var ferr: Array = []
-	for id in _lista_ferr():
-		ferr.append(_btn_ferr(str(id)))
-	var togs: Array = [_btn_tog("espelho"), _btn_tog("grade"), _btn_tog("cebola"), _btn_tog("pincel")]
-	var acoes: Array = [
-		_b("desfazer", _desfazer), _b("refazer", _refazer), _b("ajustar", _ajustar_vista),
-		_b("olho", _alternar_limpo), _b("pessoa", _abrir_sequencias), _b("importar", _abrir_importar), _b("salvar", _salvar_manual), _b("exportar", _abrir_exportar), _b("projeto", _abrir_projeto)]
-
 	var centro := VBoxContainer.new()
 	centro.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centro.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	centro.add_theme_constant_override("separation", sep)
-	centro.add_child(paleta)
+	centro.add_child(_barra_topo(sep))
 	centro.add_child(tela)
-	centro.add_child(_barra_quadros(sep))
-
-	if paisagem:
-		var h := HBoxContainer.new()
-		h.add_theme_constant_override("separation", sep)
-		h.add_child(_grade(ferr + togs, 2, sep))
-		h.add_child(centro)
-		h.add_child(_grade(acoes, 2, sep))
-		_raiz.add_child(h)
-	else:
-		var cols: int = maxi(4, int(floorf((vp.x - float(m["left"]) - float(m["right"])) / _u)))
-		centro.add_child(_grade(ferr + togs + acoes, cols, sep))
-		_raiz.add_child(centro)
-	_atualizar_play()
+	centro.add_child(_faixa_quadros(sep))
+	_inferior = VBoxContainer.new()
+	_inferior.add_theme_constant_override("separation", sep)
+	centro.add_child(_inferior)
+	_raiz.add_child(centro)
+	_encher_inferior()
 
 
-func _grade(botoes: Array, cols: int, sep: int) -> GridContainer:
-	var g := GridContainer.new()
-	g.columns = cols
-	g.add_theme_constant_override("h_separation", sep)
-	g.add_theme_constant_override("v_separation", sep)
-	for b in botoes:
-		g.add_child(b)
-	return g
+func _barra_topo(sep: int) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", sep)
+	var alt: float = _u * 0.95
+	var p := Boto.new("pessoa", str(doc.sequencia()["nome"]))
+	p.linha = true
+	p.custom_minimum_size = Vector2(0, alt)
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	p.size_flags_stretch_ratio = 2.2
+	p.tam_fonte = int(_u * 0.3)
+	p.pressionado.connect(_abrir_sequencias)
+	h.add_child(p)
+	h.add_child(_bt("importar", "Importar", _abrir_importar, alt))
+	h.add_child(_bt("salvar", "Salvar", _abrir_salvar, alt))
+	return h
 
 
-func _barra_quadros(sep: int) -> VBoxContainer:
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", sep)
-	var linha := HBoxContainer.new()
-	linha.add_theme_constant_override("separation", sep)
-	_btn_play = _b("play", _alternar_play)
-	linha.add_child(_btn_play)
-	linha.add_child(_b("mais", _add_quadro.bind(false)))
-	linha.add_child(_b("copiar", _add_quadro.bind(true)))
-	linha.add_child(_b("lixo", _del_quadro))
-	linha.add_child(_b("esq", _mover_quadro.bind(-1)))
-	linha.add_child(_b("dir", _mover_quadro.bind(1)))
-	_btn_fps = _b("", _ciclar_fps, str(int(doc.sequencia()["fps"])))
-	linha.add_child(_btn_fps)
-	v.add_child(linha)
-	v.add_child(quadros_ui)
-	return v
+func _faixa_quadros(sep: int) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", sep)
+	var alt: float = _u * (0.9 if _paisagem else 1.15)
+	var bd := _bt("desfazer", "", _desfazer, alt)
+	bd.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	bd.custom_minimum_size = Vector2(alt * 0.8, alt)
+	var br := _bt("refazer", "", _refazer, alt)
+	br.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	br.custom_minimum_size = Vector2(alt * 0.8, alt)
+	h.add_child(bd)
+	h.add_child(br)
+	quadros_ui.custom_minimum_size = Vector2(0, alt)
+	quadros_ui.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(quadros_ui)
+	return h
 
 
-func _lista_ferr() -> Array:
-	var l: Array = ["lapis", "borracha", "balde", "conta", "linha", "retangulo", "mao"]
-	if doc.e_golpe():
-		l.append("hitbox")
-	return l
+# ---------- gavetas (parte de baixo) ----------
+
+func _limpar_inferior() -> void:
+	if paleta.get_parent() != null:
+		paleta.get_parent().remove_child(paleta)
+	_btn_play = null
+	_btn_fps = null
+	if _inferior == null:
+		return
+	for n in _inferior.get_children():
+		_inferior.remove_child(n)
+		n.queue_free()
 
 
-func _btn_ferr(id: String) -> Control:
-	var ic: String = id
-	if id == "retangulo" and tela.cheio:
-		ic = "retangulo_cheio"
-	var b := _b(ic, _escolher_ferr.bind(id))
-	(b as Boto).ativo = (_ferr == id)
-	_botoes_ferr[id] = b
-	return b
+func _reconstruir_inferior() -> void:
+	if _inferior == null or not is_instance_valid(_inferior):
+		return
+	_encher_inferior()
 
 
-func _btn_tog(nome: String) -> Control:
-	var b := _b("ponto" if nome == "pincel" else nome, _alternar.bind(nome))
-	var bb := b as Boto
-	match nome:
-		"espelho":
-			bb.ativo = tela.espelho
-		"grade":
-			bb.ativo = tela.grade
-		"cebola":
-			bb.ativo = tela.cebola
+func _encher_inferior() -> void:
+	_limpar_inferior()
+	match _gaveta:
+		"cor":
+			_gaveta_cor()
 		"pincel":
-			bb.extra = tela.tam_pincel
-	_botoes_tog[nome] = b
-	return b
+			_gaveta_pincel()
+		"forma":
+			_gaveta_forma()
+		"vista":
+			_gaveta_vista()
+		"quadros":
+			_gaveta_quadros()
+		_:
+			_dock()
+
+
+func _abrir_gaveta(nome: String) -> void:
+	if nome == "pincel" and not FERR_PINCEL.has(_ferr):
+		_set_ferr(_ult_pincel)
+	elif nome == "forma" and not FERR_FORMA.has(_ferr):
+		_set_ferr(_ult_forma)
+	_gaveta = nome
+	_reconstruir_inferior.call_deferred()
+
+
+func _fechar_gaveta() -> void:
+	_gaveta = ""
+	_reconstruir_inferior.call_deferred()
+
+
+func _icone_forma() -> String:
+	if _ult_forma == "retangulo" and tela.cheio:
+		return "retangulo_cheio"
+	return _ult_forma
+
+
+func _linha_gaveta() -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", int(_u * 0.06))
+	return h
+
+
+func _voltar(titulo: String) -> Boto:
+	return _bt("baixo", titulo, _fechar_gaveta, _ub)
+
+
+func _dock() -> void:
+	var h := _linha_gaveta()
+	var bc := _bt("", "Cor", _abrir_gaveta.bind("cor"), _ub)
+	bc.cor_amostra = doc.paleta[_cor_i]
+	h.add_child(bc)
+	h.add_child(_item(_ult_pincel, "Pincel", _abrir_gaveta.bind("pincel"), FERR_PINCEL.has(_ferr)))
+	h.add_child(_item(_icone_forma(), "Forma", _abrir_gaveta.bind("forma"), FERR_FORMA.has(_ferr)))
+	h.add_child(_item("balde", "Balde", _escolher_ferr.bind("balde"), _ferr == "balde"))
+	h.add_child(_item("ajustar", "Vista", _abrir_gaveta.bind("vista"), _ferr == "mao"))
+	h.add_child(_item("quadros", "Quadros", _abrir_gaveta.bind("quadros"), _tocando))
+	if doc.e_golpe():
+		h.add_child(_item("hitbox", "Hitbox", _escolher_ferr.bind("hitbox"), _ferr == "hitbox"))
+	_inferior.add_child(h)
+
+
+func _gaveta_cor() -> void:
+	var l1 := _linha_gaveta()
+	l1.add_child(_voltar("Cores"))
+	l1.add_child(_item("conta", "Captar", _escolher_ferr.bind("conta"), _ferr == "conta"))
+	l1.add_child(_item("engrenagem", "Editar", _abrir_cor.bind(_cor_i)))
+	l1.add_child(_item("mais", "Nova", _abrir_cor.bind(-1)))
+	_inferior.add_child(l1)
+	paleta.custom_minimum_size = Vector2(0, _ub * 1.4)
+	paleta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_inferior.add_child(paleta)
+	paleta.definir(doc.paleta, _cor_i)
+
+
+func _gaveta_pincel() -> void:
+	var l1 := _linha_gaveta()
+	l1.add_child(_voltar("Pincel"))
+	l1.add_child(_item("lapis", "Lápis", _escolher_ferr.bind("lapis"), _ferr == "lapis"))
+	l1.add_child(_item("borracha", "Borracha", _escolher_ferr.bind("borracha"), _ferr == "borracha"))
+	l1.add_child(_item("espelho", "Espelho", _alternar.bind("espelho"), tela.espelho))
+	_inferior.add_child(l1)
+	var l2 := _linha_gaveta()
+	for n in [1, 2, 3, 4]:
+		var b := _item("ponto", "%d px" % n, _definir_pincel.bind(n), tela.tam_pincel == n)
+		b.extra = n
+		l2.add_child(b)
+	_inferior.add_child(l2)
+
+
+func _gaveta_forma() -> void:
+	var l1 := _linha_gaveta()
+	l1.add_child(_voltar("Forma"))
+	l1.add_child(_item("linha", "Linha", _escolher_ferr.bind("linha"), _ferr == "linha"))
+	l1.add_child(_item("retangulo", "Retângulo", _escolher_ferr.bind("retangulo"), _ferr == "retangulo"))
+	l1.add_child(_item("retangulo_cheio" if tela.cheio else "retangulo", "Cheio" if tela.cheio else "Vazado", _alternar_cheio, tela.cheio))
+	l1.add_child(_item("", "Fixo", _alternar_fixo, tela.forma_fixa))
+	_inferior.add_child(l1)
+	if tela.forma_fixa:
+		var mx: int = maxi(doc.largura, doc.altura)
+		_stepper(_inferior, "Largura", tela.forma_w, 1, 1, mx, _set_forma.bind("w"), _ub * 0.85)
+		_stepper(_inferior, "Altura", tela.forma_h, 1, 1, mx, _set_forma.bind("h"), _ub * 0.85)
+
+
+func _gaveta_vista() -> void:
+	var l1 := _linha_gaveta()
+	l1.add_child(_voltar("Vista"))
+	l1.add_child(_item("mao", "Mão", _escolher_ferr.bind("mao"), _ferr == "mao"))
+	l1.add_child(_item("ajustar", "Ajustar", _ajustar_vista))
+	l1.add_child(_item("grade", "Grade", _alternar.bind("grade"), tela.grade))
+	l1.add_child(_item("cebola", "Cebola", _alternar.bind("cebola"), tela.cebola))
+	l1.add_child(_item("olho", "Limpa", _alternar_limpo))
+	_inferior.add_child(l1)
+
+
+func _gaveta_quadros() -> void:
+	var l1 := _linha_gaveta()
+	l1.add_child(_voltar("Quadros"))
+	_btn_play = _item("pausa" if _tocando else "play", "Tocar", _alternar_play, _tocando)
+	l1.add_child(_btn_play)
+	_btn_fps = _item("", "%d fps" % int(doc.sequencia()["fps"]), _ciclar_fps)
+	l1.add_child(_btn_fps)
+	_inferior.add_child(l1)
+	var l2 := _linha_gaveta()
+	l2.add_child(_item("mais", "Novo", _add_quadro.bind(false)))
+	l2.add_child(_item("copiar", "Duplicar", _add_quadro.bind(true)))
+	l2.add_child(_item("lixo", "Apagar", _del_quadro))
+	l2.add_child(_item("esq", "Antes", _mover_quadro.bind(-1)))
+	l2.add_child(_item("dir", "Depois", _mover_quadro.bind(1)))
+	_inferior.add_child(l2)
+
+
+func _alternar_cheio() -> void:
+	tela.cheio = not tela.cheio
+	_agendar_save()
+	_reconstruir_inferior.call_deferred()
+
+
+func _alternar_fixo() -> void:
+	tela.forma_fixa = not tela.forma_fixa
+	_agendar_save()
+	_reconstruir_inferior.call_deferred()
+
+
+func _set_forma(v: int, qual: String) -> void:
+	if qual == "w":
+		tela.forma_w = v
+	else:
+		tela.forma_h = v
+	_agendar_save()
+
+
+func _definir_pincel(n: int) -> void:
+	tela.tam_pincel = n
+	_agendar_save()
+	_reconstruir_inferior.call_deferred()
 
 
 # ---------- ferramentas ----------
 
-func _escolher_ferr(id: String) -> void:
-	if id == "retangulo" and _ferr == "retangulo":
-		tela.cheio = not tela.cheio
-		_montar.call_deferred()
-		return
+func _set_ferr(id: String) -> void:
 	_ferr = id
+	if FERR_PINCEL.has(id):
+		_ult_pincel = id
+	elif FERR_FORMA.has(id):
+		_ult_forma = id
 	tela.ferramenta = id
 	_agendar_save()
-	for k in _botoes_ferr.keys():
-		(_botoes_ferr[k] as Boto).ativo = (k == id)
 	tela.queue_redraw()
+
+
+func _escolher_ferr(id: String) -> void:
+	_set_ferr(id)
+	_reconstruir_inferior.call_deferred()
 
 
 func _alternar(nome: String) -> void:
 	match nome:
 		"espelho":
 			tela.espelho = not tela.espelho
-			(_botoes_tog["espelho"] as Boto).ativo = tela.espelho
 		"grade":
 			tela.grade = not tela.grade
-			(_botoes_tog["grade"] as Boto).ativo = tela.grade
 		"cebola":
 			tela.cebola = not tela.cebola
-			(_botoes_tog["cebola"] as Boto).ativo = tela.cebola
 			tela.atualizar()
-		"pincel":
-			tela.tam_pincel = tela.tam_pincel % 4 + 1
-			(_botoes_tog["pincel"] as Boto).extra = tela.tam_pincel
-			(_botoes_tog["pincel"] as Boto).queue_redraw()
 	tela.queue_redraw()
 	_agendar_save()
+	_reconstruir_inferior.call_deferred()
 
 
 func _desfazer() -> void:
@@ -338,6 +502,7 @@ func _ao_escolher_cor(i: int) -> void:
 	tela.cor = doc.paleta[i]
 	if _ferr == "borracha" or _ferr == "mao" or _ferr == "hitbox":
 		_escolher_ferr("lapis")
+	_reconstruir_inferior.call_deferred()
 
 
 func _ao_captar_cor(c: Color) -> void:
@@ -470,7 +635,7 @@ func _alternar_play() -> void:
 
 
 func _atualizar_play() -> void:
-	if _btn_play != null:
+	if _btn_play != null and is_instance_valid(_btn_play):
 		_btn_play.icone = "pausa" if _tocando else "play"
 		_btn_play.ativo = _tocando
 		_btn_play.queue_redraw()
@@ -491,8 +656,9 @@ func _ciclar_fps() -> void:
 	var novo: int = int(FPS_OPCOES[(i + 1) % FPS_OPCOES.size()])
 	doc.sequencia()["fps"] = novo
 	doc.marcar_sujo()
-	_btn_fps.rotulo = str(novo)
-	_btn_fps.queue_redraw()
+	if _btn_fps != null and is_instance_valid(_btn_fps):
+		_btn_fps.rotulo = "%d fps" % novo
+		_btn_fps.queue_redraw()
 	if _tocando:
 		_tmr_play.wait_time = 1.0 / float(novo)
 	_agendar_save()
@@ -519,7 +685,7 @@ func _salvar() -> void:
 func _salvar_sessao() -> void:
 	var vp: Vector2 = get_viewport_rect().size
 	var d := {"id": doc.id, "ferr": _ferr, "cor": _cor_i, "espelho": tela.espelho, "grade": tela.grade,
-		"cebola": tela.cebola, "pincel": tela.tam_pincel, "cheio": tela.cheio, "zoom": tela.zoom,
+		"cebola": tela.cebola, "pincel": tela.tam_pincel, "cheio": tela.cheio, "forma_fixa": tela.forma_fixa, "fw": tela.forma_w, "fh": tela.forma_h, "zoom": tela.zoom,
 		"ox": tela.origem.x, "oy": tela.origem.y, "auto": tela._auto_ajuste, "vp": [vp.x, vp.y]}
 	DirAccess.make_dir_recursive_absolute("user://forja/")
 	var f := FileAccess.open(SESSAO, FileAccess.WRITE)
@@ -544,6 +710,13 @@ func _restaurar_sessao() -> void:
 	tela.cebola = bool(s.get("cebola", false))
 	tela.tam_pincel = clampi(int(s.get("pincel", 1)), 1, 4)
 	tela.cheio = bool(s.get("cheio", false))
+	tela.forma_fixa = bool(s.get("forma_fixa", true))
+	tela.forma_w = clampi(int(s.get("fw", 16)), 1, 512)
+	tela.forma_h = clampi(int(s.get("fh", 16)), 1, 512)
+	if FERR_PINCEL.has(_ferr):
+		_ult_pincel = _ferr
+	elif FERR_FORMA.has(_ferr):
+		_ult_forma = _ferr
 	_vista_salva = s
 
 
@@ -573,6 +746,11 @@ func _nova_folha(titulo: String) -> Variant:
 	return f
 
 
+func _fechar_folha() -> void:
+	if _folha != null and is_instance_valid(_folha):
+		_folha.fechar()
+
+
 func _rotulo(texto: String, cor: Color = Estilo.TEXTO, escala: float = 0.34) -> Label:
 	var l := Label.new()
 	l.text = texto
@@ -594,18 +772,21 @@ func _linha(rotulo: String, icone: String, cb: Callable, ativo: bool = false) ->
 	return b
 
 
-func _stepper(pai: Control, titulo: String, valor: int, passo: int, mn: int, mx: int, cb: Callable) -> void:
+func _stepper(pai: Control, titulo: String, valor: int, passo: int, mn: int, mx: int, cb: Callable, alt: float = 0.0) -> void:
+	var a: float = alt if alt > 0.0 else _u * 0.9
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", int(_u * 0.1))
 	var l := _rotulo(titulo)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(l)
 	var v := _rotulo(str(valor), Estilo.DESTAQUE, 0.4)
-	v.custom_minimum_size = Vector2(_u * 1.3, 0)
+	v.custom_minimum_size = Vector2(a * 1.3, 0)
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var menos := _b("menos", _passo.bind(v, -passo, mn, mx, cb))
+	menos.custom_minimum_size = Vector2(a, a)
 	menos.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var mais := _b("mais", _passo.bind(v, passo, mn, mx, cb))
+	mais.custom_minimum_size = Vector2(a, a)
 	mais.size_flags_horizontal = Control.SIZE_SHRINK_END
 	h.add_child(menos)
 	h.add_child(v)
@@ -624,6 +805,7 @@ func _passo(v: Label, delta: int, mn: int, mx: int, cb: Callable) -> void:
 func _abrir_sequencias() -> void:
 	var f: Variant = _nova_folha("Personagem")
 	var c: VBoxContainer = f.conteudo
+	c.add_child(_linha("Importar sprites (vários de uma vez)", "importar", _abrir_importar))
 	var nome := LineEdit.new()
 	nome.text = doc.nome
 	nome.custom_minimum_size = Vector2(0, _u)
@@ -667,9 +849,10 @@ func _abrir_sequencias() -> void:
 	c.add_child(_linha("Novo golpe", "mais", _novo_golpe))
 
 
-func _linha_seq(i: int) -> Control:
+func _linha_seq(i: int, cb: Callable = Callable()) -> Control:
 	var s: Dictionary = doc.sequencias[i]
-	var b := _linha(str(s["nome"]), "quadros", _escolher_seq.bind(i), i == doc.seq) as Boto
+	var acao: Callable = cb if cb.is_valid() else _escolher_seq.bind(i)
+	var b := _linha(str(s["nome"]), "quadros", acao, i == doc.seq) as Boto
 	var q: Array = s["quadros"]
 	if not q.is_empty():
 		b.textura = ImageTexture.create_from_image(q[0])
@@ -727,6 +910,7 @@ func _abrir_ficha(i: int) -> void:
 	var lista: Array = []
 	for b in Formato.BOTOES:
 		var bb := _b("", Callable(), str(b))
+		bb.custom_minimum_size = Vector2(0, _u)
 		(bb as Boto).ativo = (str(g["botao"]) == str(b))
 		lista.append(bb)
 		botoes.add_child(bb)
@@ -792,18 +976,18 @@ func _apagar_golpe(i: int) -> void:
 
 
 # --- importar sprites ---
+# Fluxo: escolher origem (galeria/arquivos, vários de uma vez) -> dizer para qual ação ou golpe vão.
 
 func _abrir_importar() -> void:
 	var f: Variant = _nova_folha("Importar sprites")
 	var c: VBoxContainer = f.conteudo
 	c.add_child(_linha("Galeria de fotos", "png", _pedir_import.bind("galeria")))
 	c.add_child(_linha("Explorador de arquivos", "projeto", _pedir_import.bind("arquivos")))
-	c.add_child(_rotulo("Cada imagem vira um quadro novo da sequência atual, ajustada ao tamanho da arte (pés na base).", Estilo.SUAVE, 0.28))
+	c.add_child(_rotulo("Escolha vários sprites de uma vez. Depois você diz para qual ação ou golpe eles vão (andando, soco, um golpe novo...). Cada imagem vira um quadro, ajustada ao tamanho da arte (pés na base).", Estilo.SUAVE, 0.28))
 
 
 func _pedir_import(origem: String) -> void:
-	if _folha != null:
-		_folha.fechar()
+	_fechar_folha()
 	_seletor.pedir(origem, true, "imagem")
 
 
@@ -818,24 +1002,57 @@ func _ao_importar(caminhos: PackedStringArray) -> void:
 	if imgs.is_empty():
 		_toast("Nao consegui ler as imagens escolhidas.")
 		return
-	var n: int = doc.inserir_quadros(imgs)
+	_pend_imgs = imgs
+	_abrir_destino()
+
+
+func _abrir_destino() -> void:
+	var f: Variant = _nova_folha("Destino (%d sprites)" % _pend_imgs.size())
+	var c: VBoxContainer = f.conteudo
+	c.add_child(_rotulo("Golpe novo", Estilo.SUAVE))
+	var ed := LineEdit.new()
+	ed.placeholder_text = "Nome do golpe (ex: Hadouken)"
+	ed.custom_minimum_size = Vector2(0, _u)
+	ed.add_theme_font_size_override("font_size", int(_u * 0.4))
+	c.add_child(ed)
+	c.add_child(_linha("Criar golpe e importar", "mais", _import_novo_golpe.bind(ed)))
+	c.add_child(_rotulo("Ações do personagem", Estilo.SUAVE))
+	for i in range(doc.sequencias.size()):
+		if str(doc.sequencias[i]["tipo"]) == "slot":
+			c.add_child(_linha_seq(i, _import_para.bind(i)))
+	c.add_child(_rotulo("Golpes", Estilo.SUAVE))
+	for i in range(doc.sequencias.size()):
+		if str(doc.sequencias[i]["tipo"]) == "golpe":
+			c.add_child(_linha_seq(i, _import_para.bind(i)))
+
+
+func _import_novo_golpe(ed: LineEdit) -> void:
+	var t: String = ed.text.strip_edges()
+	var i: int = doc.adicionar_golpe()
+	if t != "":
+		(doc.sequencias[i]["golpe"] as Dictionary)["nome"] = t
+		doc.sequencias[i]["nome"] = t
+	_import_para(i)
+
+
+# Os sprites entram no fim dos quadros da ação/golpe escolhido.
+func _import_para(i: int) -> void:
+	_fechar_folha()
+	if _pend_imgs.is_empty():
+		return
+	doc.selecionar(i)
+	doc.ir_quadro(doc.quadros().size() - 1)
+	var n: int = doc.inserir_quadros(_pend_imgs)
+	_pend_imgs = []
+	_tocando = false
+	_tmr_play.stop()
+	_montar()
 	_sincronizar()
 	_agendar_save()
-	_toast("%d quadro(s) importado(s)." % n)
+	_toast("%d quadro(s) em %s." % [n, str(doc.sequencia()["nome"])])
 
 
 # --- exportar ---
-
-func _abrir_exportar() -> void:
-	var f: Variant = _nova_folha("Exportar")
-	var c: VBoxContainer = f.conteudo
-	c.add_child(_linha("PNG do quadro", "png", _exportar.bind("png")))
-	c.add_child(_linha("PNG folha de sprites", "quadros", _exportar.bind("folha")))
-	c.add_child(_linha("GIF da animação", "gif", _exportar.bind("gif")))
-	c.add_child(_linha("Personagem (.ember)", "ember", _exportar.bind("ember")))
-	_exp_status = _rotulo("", Estilo.SUAVE, 0.3)
-	c.add_child(_exp_status)
-
 
 func _exportar(tipo: String) -> void:
 	_salvar()
@@ -853,21 +1070,29 @@ func _exportar(tipo: String) -> void:
 		_exp_status.text = str(r.get("msg", ""))
 
 
-# --- projeto ---
+# --- salvar, exportar e projetos ---
 
-func _abrir_projeto() -> void:
-	var f: Variant = _nova_folha("Projeto")
+func _abrir_salvar() -> void:
+	var f: Variant = _nova_folha("Salvar e exportar")
 	var c: VBoxContainer = f.conteudo
 	c.add_child(_linha("Salvar agora", "salvar", _salvar_manual))
+	c.add_child(_rotulo("Exportar", Estilo.SUAVE))
+	c.add_child(_linha("PNG do quadro", "png", _exportar.bind("png")))
+	c.add_child(_linha("PNG folha de sprites", "quadros", _exportar.bind("folha")))
+	c.add_child(_linha("GIF da animação", "gif", _exportar.bind("gif")))
+	c.add_child(_linha("Personagem (.ember)", "ember", _exportar.bind("ember")))
+	_exp_status = _rotulo("", Estilo.SUAVE, 0.3)
+	c.add_child(_exp_status)
 	c.add_child(_rotulo("Novo personagem (tamanho da arte)", Estilo.SUAVE))
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", int(_u * 0.08))
+	var h := HFlowContainer.new()
+	h.add_theme_constant_override("h_separation", int(_u * 0.08))
+	h.add_theme_constant_override("v_separation", int(_u * 0.08))
 	for n in [32, 48, 64, 96, 128, 192]:
 		h.add_child(_b("", _novo_projeto.bind(int(n)), str(n)))
 	c.add_child(h)
 	var lista: Array = Documento.listar_projetos()
 	if not lista.is_empty():
-		c.add_child(_rotulo("Abrir", Estilo.SUAVE))
+		c.add_child(_rotulo("Abrir personagem", Estilo.SUAVE))
 		for p in lista:
 			c.add_child(_linha(str(p["nome"]), "pessoa", _abrir_projeto_id.bind(str(p["id"])), str(p["id"]) == doc.id))
 

@@ -518,6 +518,7 @@ func _alternar(nome: String) -> void:
 	_reconstruir_inferior.call_deferred()
 
 
+
 func _desfazer() -> void:
 	if doc.desfazer():
 		_apos_trocar_seq()
@@ -854,7 +855,7 @@ func _passo(v: Label, delta: int, mn: int, mx: int, cb: Callable) -> void:
 	cb.call(novo)
 
 
-# --- personagem: estados e golpes ---
+# --- personagem: animações e golpes ---
 
 func _grade_tiles() -> HFlowContainer:
 	var g := HFlowContainer.new()
@@ -1191,7 +1192,7 @@ func _import_novo_golpe(ed: LineEdit) -> void:
 	_import_para(i)
 
 
-# Os sprites entram no fim dos quadros do estado/golpe escolhido, cada um com o seu tamanho.
+# Os sprites entram no fim dos quadros do estado/golpe escolhido.
 func _import_para(i: int) -> void:
 	_fechar_folha()
 	if _pend_imgs.is_empty():

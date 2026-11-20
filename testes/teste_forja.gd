@@ -129,5 +129,47 @@ func _initialize() -> void:
 	_ok((d2.sequencias[0]["quadros"][0] as Image).get_pixel(3, 4) == Color.RED, "pixel salvo")
 	_ok((d2.sequencias[1]["quadros"][0] as Image).get_width() == 10 and (d2.sequencias[1]["quadros"][0] as Image).get_height() == 20, "tamanho de cada sprite salvo e reaberto")
 
+	# 100 sprites de tamanhos diferentes: o Forja nunca muda o tamanho de nenhum
+	var dg := Documento.new()
+	dg.novo("Tamanhos", 64, 64)
+	var imgs: Array = []
+	var tams: Array = []
+	for i in range(100):
+		var w: int = 5 + (i * 7) % 300
+		var h: int = 3 + (i * 13) % 400
+		if i == 50:
+			w = 700
+			h = 900
+		var im := Image.create(w, h, false, Image.FORMAT_RGBA8)
+		im.fill(Color(float(i % 10) / 10.0, 0.5, 0.2, 1.0))
+		imgs.append(im)
+		tams.append(Vector2i(w, h))
+	dg.selecionar(0)
+	_ok(dg.inserir_quadros(imgs) == 100 and dg.quadros().size() == 100, "100 sprites importados")
+	var iguais: bool = true
+	for i in range(100):
+		var qi: Image = dg.quadros()[i]
+		if qi.get_width() != (tams[i] as Vector2i).x or qi.get_height() != (tams[i] as Vector2i).y:
+			iguais = false
+	_ok(iguais, "importar 100 sprites de tamanhos diferentes nao muda nenhum tamanho")
+	_ok(dg.salvar() == "", "salvar os 100 sprites")
+	var dg2 := Documento.new()
+	_ok(dg2.abrir(dg.id), "abrir os 100 sprites")
+	var iguais2: bool = dg2.sequencias[0]["quadros"].size() == 100
+	for i in range(100):
+		var qj: Image = dg2.sequencias[0]["quadros"][i]
+		if qj.get_width() != (tams[i] as Vector2i).x or qj.get_height() != (tams[i] as Vector2i).y:
+			iguais2 = false
+	_ok(iguais2, "salvar e reabrir nao muda nenhum tamanho")
+	var mg: Dictionary = Exportador.montar_ember(dg2)
+	_ok(bool(mg["ok"]), "montar_ember dos 100 sprites: " + str(mg.get("erro", "")))
+	var iguais3: bool = true
+	for i in range(100):
+		var png2 := Image.new()
+		var bytes: PackedByteArray = mg["arquivos"]["sprites/parado_%d.png" % (i + 1)]
+		if png2.load_png_from_buffer(bytes) != OK or png2.get_width() != (tams[i] as Vector2i).x or png2.get_height() != (tams[i] as Vector2i).y:
+			iguais3 = false
+	_ok(iguais3, ".ember leva cada sprite no tamanho exato")
+
 	print("falhas: ", falhas)
 	quit(falhas)

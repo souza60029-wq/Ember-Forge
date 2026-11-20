@@ -103,7 +103,6 @@ func imagem() -> Image:
 	return quadros()[quadro]
 
 
-# largura x altura = tamanho PADRÃO de um sprite novo. Cada quadro pode ter o seu próprio tamanho.
 func nova_imagem() -> Image:
 	var img := Image.create(largura, altura, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))

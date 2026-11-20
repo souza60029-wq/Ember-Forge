@@ -155,7 +155,7 @@ func _draw() -> void:
 			draw_line(origem + Vector2(float(x) * zoom, 0.0), origem + Vector2(float(x) * zoom, h * zoom), gc, 1.0)
 		for y in range(ih + 1):
 			draw_line(origem + Vector2(0.0, float(y) * zoom), origem + Vector2(w * zoom, float(y) * zoom), gc, 1.0)
-	draw_rect(r, Estilo.BORDA, false, 2.0)
+	draw_rect(r.grow(1.0), Estilo.BORDA, false, 2.0)   # moldura por fora: nunca cobre um pixel do sprite
 	# guia dos pés: centro e base da imagem (a engine alinha o sprite por aí)
 	var gx: float = origem.x + w * 0.5 * zoom
 	draw_line(Vector2(gx, r.end.y - 14.0), Vector2(gx, r.end.y), Estilo.DESTAQUE, 2.0)
